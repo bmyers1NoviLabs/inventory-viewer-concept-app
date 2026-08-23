@@ -1,0 +1,43 @@
+{
+  "region": "us-east-2",
+  "basins": ["Utica", "Marcellus"],
+  "drilled_scope": "Appalachia",
+  "sources": [
+    {
+      "local": "data/NGL_ForecastWellMonths.tsv",
+      "s3": "s3://novi-bulk-api-data/bulk-api-data-raw/us-onshore/Appalachia/All subbasins/Bulk/Database/NGL_ForecastWellMonths.tsv"
+    },
+    {
+      "local": "data/WellDetails.tsv",
+      "s3": "s3://novi-bulk-api-data/bulk-api-data-raw/us-onshore/Appalachia/All subbasins/Bulk/Database/WellDetails.tsv"
+    },
+    {
+      "local": "data/WellboreLocations.tsv",
+      "s3": "s3://novi-bulk-api-data/bulk-api-data-raw/us-onshore/Appalachia/All subbasins/Bulk/Database/WellboreLocations.tsv"
+    },
+    {
+      "local": "data/Undrilled_{basin}_ForecastWellMonths.csv",
+      "s3": "s3://novi-master-undrilled-bulk-data/Undrilled_{basin}_ForecastWellMonths.csv"
+    },
+    {
+      "local": "data/Undrilled_{basin}_WellDetails.csv",
+      "s3": "s3://novi-master-undrilled-bulk-data/Undrilled_{basin}_WellDetails.csv"
+    },
+    {
+      "local": "data/Undrilled_{basin}_WellboreLocations.csv",
+      "s3": "s3://novi-master-undrilled-bulk-data/Undrilled_{basin}_WellboreLocations.csv"
+    },
+    {
+      "local": "data/Undrilled_{basin}_ML_Features.csv",
+      "s3": "s3://novi-master-undrilled-bulk-data/Undrilled_{basin}_ML_Features.csv"
+    },
+    {
+      "local": "data/econ/undrilled_{basin}.zip",
+      "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/undrilled_{basin}*}"
+    },
+    {
+      "local": "data/econ/drilled_{basin}.zip",
+      "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/drilled_{basin}*}"
+    }
+  ]
+}
