@@ -588,9 +588,10 @@
       <button data-qm="model" aria-pressed="false">Model inputs</button>
     </div>
     <div class="seg" role="group" aria-label="Group by" id="qegroupseg"></div>
-    <span id="qehint" style="font-size:10.5px;color:var(--muted)">wells to drill per period · prefilled from each group's last-year drilling pace</span>
+    <span id="qehint" style="font-size:10.5px;color:var(--muted)">wells to drill per period · prefilled from actual drilling pace — last full half-year, annualized</span>
     <span style="flex:1"></span>
     <button class="link" id="qe-run" style="font-size:12px;font-weight:600;color:#fff;background:var(--accent);border:none;border-radius:14px;padding:5px 16px;cursor:pointer">Run Model</button>
+    <button class="link" id="qe-report" style="font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">Valuation report ⬇</button>
     <button class="link" id="qe-export" style="font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">Export schedule CSV</button>
   </div>
   <div id="qegroups"></div>
@@ -3729,6 +3730,32 @@ const QE_PERIODS=(()=>{
     renderQE();
   }));
 }
+/* actual drilling pace for a schedule group, from the WellDetails table baked
+   in at build time (horizontal wells, non-permit status, by first-production
+   half-year). The reference half is the last FULL half-year — 9 months back
+   from today — and its count is annualized (x2). */
+function paceFor(keys,parts){
+  if(!D.pace||!D.pace.rows) return null;
+  const hk=l=>+l.slice(0,4)*2+(l.slice(4)==="H2"?1:0);
+  const t=new Date(); t.setMonth(t.getMonth()-9);
+  const want=t.getFullYear()*2+(t.getMonth()>=6?1:0);
+  let hi=-1,best=-Infinity;
+  D.pace.halves.forEach((l,i)=>{const k=hk(l); if(k<=want&&k>best){best=k;hi=i;}});
+  if(hi<0) hi=0;                              /* stale build — oldest half it has */
+  const DIM={Operator:0,Play:1,State:2,County:3};
+  const px=keys.map(k=>DIM[k]);
+  if(px.some(x=>x==null)) return null;        /* group dim the pace table lacks */
+  const wantv=parts.map(p=>p.trim().toLowerCase());
+  let n=0;
+  for(const r of D.pace.rows){
+    let ok=true;
+    for(let j=0;j<px.length;j++) if(String(r[px[j]]).trim().toLowerCase()!==wantv[j]){ok=false;break;}
+    if(ok) n+=r[4][hi]||0;
+  }
+  const annual=n*2;
+  return {half:D.pace.halves[hi].replace("H"," H"), n, annual,
+          perQ:Math.round(annual/4*10)/10, perY:Math.round(annual*10)/10};
+}
 function renderQE(){
   const host=document.getElementById("qegroups");
   if(!D.drilled){ host.innerHTML=""; return; }
@@ -3752,15 +3779,21 @@ function renderQE(){
   const sched=QESCHED[qeGroupBy]||(QESCHED[qeGroupBy]={});
   host.innerHTML=groups.map(([key,o])=>{
     const hist=Math.max(0,Math.round(o.recent/4));
-    if(!sched[key]) sched[key]=QE_PERIODS.map(([,mult])=>hist*mult);
+    const pace=paceFor(keys,keys.length?key.split(" · "):[]);
+    if(!sched[key]) sched[key]=pace
+      ? QE_PERIODS.map(([,mult])=>mult===1?pace.perQ:pace.perY)
+      : QE_PERIODS.map(([,mult])=>hist*mult);
     const cells=QE_PERIODS.map(([lab,mult],j)=>
       `<div class="qc${mult===4?" yr":""}"><label>${lab}</label>
-       <input type="number" min="0" step="1" value="${sched[key][j]||0}" data-j="${j}"></div>`).join("");
+       <input type="number" min="0" step="any" value="${sched[key][j]||0}" data-j="${j}"></div>`).join("");
+    const histLine=pace
+      ? `Actual pace ${pace.half} (horizontal, non-permit): <b>${pace.n}</b> wells → <b>${pace.perY}</b>/yr · <b>${pace.perQ}</b>/qtr prefilled`
+      : `Historical wells per quarter (last-year average, ${maxY}): <b>${hist}</b>`;
     return `<div class="qexp" data-key="${esc(key)}">
       <div class="qx-head"><span>${esc(key)}</span>
         <span class="n">${o.n.toLocaleString()} drilled wells</span><span class="chev">▾</span></div>
       <div class="qx-body">
-        <div class="qx-hist">Historical wells per quarter (last-year average, ${maxY}): <b>${hist}</b></div>
+        <div class="qx-hist">${histLine}</div>
         <div class="qgrid">${cells}</div>
       </div></div>`;
   }).join("")+(cut?`<div style="font-size:11px;color:var(--muted);padding:8px 2px">showing the 30 largest groups by drilled well count</div>`:"")
@@ -3768,7 +3801,7 @@ function renderQE(){
   host.querySelectorAll(".qexp").forEach(x=>{
     x.querySelector(".qx-head").addEventListener("click",()=>x.classList.toggle("open"));
     x.querySelectorAll("input").forEach(inp=>inp.addEventListener("change",()=>{
-      const v=Math.max(0,Math.round(parseFloat(inp.value)||0));
+      const v=Math.max(0,Math.round((parseFloat(inp.value)||0)*10)/10);  /* fractional wells allowed */
       inp.value=v;
       sched[x.dataset.key][+inp.dataset.j]=v;
     }));
@@ -3989,7 +4022,7 @@ function runModel(){
   const pdp=econ(pdpS,null,T,r);
   const pud=econ(pudS,capex,T,r);
   let capexTot=0; for(let t=0;t<T;t++) capexTot+=capex[t];
-  QERES={eff,T,pdpS,pudS,pdp,pud,capexTot,wellsSpud,exhausted:[...new Set(exhausted)]};
+  QERES={eff,T,pdpS,pudS,pdp,pud,capex,capexTot,wellsSpud,exhausted:[...new Set(exhausted)]};
   const $M=v=>"$"+(v/1e6).toFixed(1)+"M";
   document.getElementById("qeres").innerHTML=[
     ["PDP PV"+qiv("disc").toFixed(0),$M(pdp.pv)],
@@ -4019,9 +4052,96 @@ document.querySelectorAll("#qemodeseg button").forEach(b=>b.addEventListener("cl
   document.getElementById("qegroupseg").style.display=model?"none":"";
   document.getElementById("qehint").textContent=model
     ?"edit the blue cells, then Run Model — $/bbl and $/Mcf throughout; PDP + scheduled undrilled valued separately"
-    :"wells to drill per period · prefilled from each group's last-year drilling pace";
+    :"wells to drill per period · prefilled from actual drilling pace — last full half-year, annualized";
   if(model) buildQI();
 }));
+
+/* ── Quick-Eval: valuation report (xlsx) — PDP + PUD value in the acquisition-
+   summary format: assumptions, modeled net PDP production for the current
+   quarter, YoY declines, NTM op cash flow and multiples, and a NAV table +
+   chart across discount rates. Everything derives from the last model run. ── */
+function qeReport(){
+  buildQI();
+  if(!QERES) runModel();
+  if(!QERES) return;
+  const {eff,T,pdpS,pudS,capex,capexTot,wellsSpud}=QERES;
+  const nri=qiv("nri")/100, disc=qiv("disc");
+  const RATES=[0,5,8,10,12,15,20,25];
+  const pdpNAV=RATES.map(k=>econ(pdpS,null,T,k/100).pv/1e6);
+  const pudNAV=RATES.map(k=>econ(pudS,capex,T,k/100).pv/1e6);
+  const i10=RATES.indexOf(10), pdp10=pdpNAV[i10], pud10=pudNAV[i10];
+  /* current-quarter modeled net PDP production = first three forecast months */
+  const avg3=a=>{let s=0;for(let t=0;t<3;t++)s+=a[t]||0;return s/3;};
+  const oilK=avg3(pdpS.oil)*nri/1e3,          /* Mbbl/d */
+        nglK=avg3(pdpS.ngl)*nri/1e3,
+        gasM=avg3(pdpS.gas)*nri/1e3;          /* MMcf/d, dry */
+  const boeK=oilK+nglK+gasM/6;
+  /* year-over-year declines on the three-stream boe wedge */
+  const yb=y=>{let s=0;for(let t=y*12;t<y*12+12;t++)s+=(pdpS.oil[t]||0)+(pdpS.ngl[t]||0)+(pdpS.gas[t]||0)/6;return s;};
+  const y1=yb(0),y2=yb(1),y3=yb(2);
+  const ntm=QERES.pdp.ntm/1e6;
+  const effY=Math.floor(eff/12), effM=eff%12, effQ="Q"+(Math.floor(effM/3)+1)+" "+effY;
+  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const r1=x=>Math.round(x*10)/10, r2=x=>Math.round(x*100)/100;
+  const pc=x=>Math.round(x*1000)/10+"%";
+  /* the NAV table sits in A1:D9 because the embedded chart reads its
+     categories from column A and its series from columns B-D */
+  const aoa=[
+    ["NAV by discount rate ($MM)","PDP","PUD (after capex)","Combined"],
+    ...RATES.map((k,i)=>[k+"%",r1(pdpNAV[i]),r1(pudNAV[i]),r1(pdpNAV[i]+pudNAV[i])]),
+    [],
+    ["Appalachia Inventory — PDP + Drill-out Valuation"],
+    ["Effective date","1-"+MON[effM]+"-"+effY],
+    ["Wells in view",nSelD.toLocaleString()+" drilled (PDP) · "+nSel.toLocaleString()+" undrilled"],
+    [],
+    ["ECONOMIC ASSUMPTIONS (flat pricing, before differentials)"],
+    ["Oil ($/bbl)",qiv("oilp"),"less $"+qiv("doil")+" differential"],
+    ["Gas ($/Mcf, dry)",qiv("gasp"),"less $"+qiv("dgas")+" differential"],
+    ["NGL ($/bbl)",qiv("nglp"),"less $"+qiv("dngl")+" differential"],
+    ["Opex — oil ($/bbl)",qiv("opoil")],
+    ["Opex — gas lifting ($/Mcf wet)",qiv("opgas")],
+    ["Opex — NGL processing ($/bbl)",qiv("opngl")],
+    ["Production tax (% of revenue)",qiv("tax")],
+    ["NRI (%)",qiv("nri")],
+    ["Discount rate (%)",disc],
+    [],
+    [effQ+" PRODUCTION (modeled net PDP)"],
+    ["Oil (Mbbl/d)",r2(oilK)],
+    ["NGL (Mbbl/d)",r2(nglK)],
+    ["Gas (MMcf/d, dry)",r2(gasM)],
+    ["Equivalent (Mboe/d, 6:1)",r2(boeK)],
+    ["% liquids",boeK?pc((oilK+nglK)/boeK):"–"],
+    ["% gas",boeK?pc(gasM/6/boeK):"–"],
+    ["1st year decline",y1?pc(1-y2/y1):"–"],
+    ["2nd year decline",y2?pc(1-y3/y2):"–"],
+    [],
+    ["PDP VALUATION ($MM)"],
+    ["PDP PV10",r1(pdp10)],
+    ...(disc!==10?[["PDP PV"+disc,r1(QERES.pdp.pv/1e6)]]:[]),
+    ["NTM PDP op cash flow",r1(ntm)],
+    ["PDP op CF multiple (PV10 / NTM CF)",ntm>0?r1(pdp10/ntm)+"x":"–"],
+    ["PV10 per flowing boe/d ($)",boeK>0?Math.round(pdp10*1e6/(boeK*1000)).toLocaleString():"–"],
+    [],
+    ["DRILL-OUT (PUD) VALUATION ($MM)"],
+    ["Wells scheduled",r1(wellsSpud)],
+    ["PUD capex",r1(capexTot/1e6)],
+    ["PUD PV10 (after capex)",r1(pud10)],
+    ...(disc!==10?[["PUD PV"+disc+" (after capex)",r1(QERES.pud.pv/1e6)]]:[]),
+    ["Implied $/location (PV10)",wellsSpud>0?r1(pud10/wellsSpud):"–"],
+    [],
+    ["Flat prices less absolute differentials; per-unit opex; PDP blown down from its wedge streams,"],
+    ["scheduled undrilled wells layered on their own forecast curves (best NPV10 first), D&C capex at spud."],
+  ];
+  xlDownload(`valuation_${effQ.replace(" ","_")}.xlsx`,aoa,{
+    type:"line",title:"NAV by discount rate ($MM)",
+    cats:RATES.map(k=>k+"%"),catTitle:"Discount rate",yTitle:"$MM",
+    series:[
+      {name:"PDP",color:hex6(JITTER_COLORS[6]),vals:pdpNAV.map(r1)},
+      {name:"PUD (after capex)",color:hex6(JITTER_COLORS[1]),vals:pudNAV.map(r1)},
+      {name:"Combined",color:"101416",vals:pdpNAV.map((v,i)=>r1(v+pudNAV[i]))},
+    ]});
+}
+document.getElementById("qe-report").addEventListener("click",qeReport);
 
 document.getElementById("qe-export").addEventListener("click",()=>{
   const sched=QESCHED[qeGroupBy]||{};

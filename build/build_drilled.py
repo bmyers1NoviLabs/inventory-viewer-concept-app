@@ -117,6 +117,60 @@ D["drilled"] = {
   "metrics": metrics, "qmeta": qmeta, "qblob": blob,
 }
 open(OUT/"drilled_api_order.txt","w").write("\n".join(d["_k"]))  # wedge matrix row order
+
+# ── drilling pace from WellDetails.tsv: horizontal, non-permit wells bucketed
+#    by first-production HALF-YEAR. Fuels the Quick-Eval schedule prefill —
+#    the page picks the last full half (9 months back), annualizes it (x2)
+#    and spreads it across the schedule columns. Column names are resolved
+#    case-insensitively so export renames don't break the build. ──
+import re as _re
+_hdr = pd.read_csv(DATA/"WellDetails.tsv", sep="\t", nrows=0).columns.tolist()
+def _find(*pats):
+    for p in pats:
+        for c in _hdr:
+            if _re.fullmatch(p, c.strip(), _re.I): return c
+    return None
+_c = {
+  "fpd":    _find(r"first.?production.?date", r".*first.?prod\w*.?date.*"),
+  "hz":     _find(r"is.?horizontal.?well", r".*is.?horizontal.*", r"hole.?direction"),
+  "status": _find(r"status", r".*well.?status.*", r".*current.?status.*"),
+  "op":     _find(r"current.?operator", r"operator"),
+  "state":  _find(r"state"),
+  "county": _find(r"county"),
+  "form":   _find(r"formation"),
+}
+_missing = [k for k,v in _c.items() if v is None]
+if _missing:
+    print(f"WellDetails pace SKIPPED — no column for {_missing}; available: {_hdr}")
+else:
+    wp = pd.read_csv(DATA/"WellDetails.tsv", sep="\t", dtype=str, usecols=list(set(_c.values())))
+    n0 = len(wp)
+    hz = wp[_c["hz"]].astype(str).str.strip().str.lower()
+    wp = wp[hz.isin(["t","true","1","y","yes","horizontal","h"])]
+    wp = wp[~wp[_c["status"]].astype(str).str.contains("permit", case=False, na=False)]
+    fpd = pd.to_datetime(wp[_c["fpd"]], errors="coerce")
+    wp = wp[fpd.notna()]; fpd = fpd[fpd.notna()]
+    hk = fpd.dt.year.astype(int)*2 + (fpd.dt.month > 6).astype(int)   # half-year key
+    keep = sorted(set(hk))[-6:]                                       # trailing 6 halves
+    m = hk.isin(keep)
+    wp, hk = wp[m], hk[m]
+    fu = wp[_c["form"]].fillna("").astype(str).str.strip().str.upper()
+    hlab = lambda k: f"{k//2}H{k%2+1}"
+    tbl = pd.DataFrame({
+        "op":     wp[_c["op"]].fillna("Unknown").astype(str).str.strip(),
+        "play":   ["Marcellus" if f in MARC_F else "Utica" if f in UTICA_F else "Unknown" for f in fu],
+        "state":  wp[_c["state"]].fillna("Unknown").astype(str).str.strip(),
+        "county": wp[_c["county"]].fillna("Unknown").astype(str).str.strip(),
+        "h":      hk.values})
+    hpos = {k:i for i,k in enumerate(keep)}
+    rows = {}
+    for (op,pl,st,co,hh),n in tbl.groupby(["op","play","state","county","h"]).size().items():
+        rows.setdefault((op,pl,st,co),[0]*len(keep))[hpos[hh]] = int(n)
+    D["pace"] = {"halves":[hlab(k) for k in keep],
+                 "rows":[[op,pl,st,co,c] for (op,pl,st,co),c in sorted(rows.items())]}
+    print(f"drilling pace: {int(m.sum()):,} of {n0:,} WellDetails wells "
+          f"(horizontal, non-permit, FPD {hlab(keep[0])}-{hlab(keep[-1])}) -> {len(rows):,} pace groups")
+
 s = json.dumps(D, separators=(",",":"))
 open(OUT/"welldata.json","w").write(s)
 open(OUT/"welldata.gz.b64","w").write(base64.b64encode(gzip.compress(s.encode(),6)).decode())
