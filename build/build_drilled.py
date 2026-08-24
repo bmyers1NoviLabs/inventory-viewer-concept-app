@@ -118,6 +118,39 @@ D["drilled"] = {
 }
 open(OUT/"drilled_api_order.txt","w").write("\n".join(d["_k"]))  # wedge matrix row order
 
+# ── phase windows: same shapefiles + rename + methodology as build_welldata,
+#    so drilled and undrilled wells share one phase-window vocabulary ──
+WIN_RENAME = {"Black Oil":"Oil","Vol. Oil":"Wet Gas"}
+_WINDOWS = {}
+try:
+    import geopandas as gpd
+    from shapely.geometry import Point
+    for _b in BASINS:
+        _z = ROOT/"data/static/phase_windows"/f"{_b}.zip"
+        _wd = _unzip(_z, OUT/f"_pw_dr_{_b}")
+        import glob as _glob
+        _shp = sorted(_glob.glob(str(_wd/"**"/"*.shp"), recursive=True))[0]
+        _w = gpd.read_file(_shp).to_crs(4326)
+        _w["PW"] = _w["Phase"].map(lambda x: WIN_RENAME.get(str(x).strip(), str(x).strip()))
+        _WINDOWS[_b] = _w[["PW","geometry"]]
+except Exception as _e:
+    print(f"phase windows unavailable ({_e}) — Phase grouping will be Unknown")
+    _WINDOWS = {}
+
+def classify_pw(lons, lats, plays):
+    """point-in-window classification per play; Unknown play or no windows -> Unknown"""
+    out = ["Unknown"]*len(lons)
+    if not _WINDOWS: return out
+    pts = gpd.GeoDataFrame({"i": range(len(lons)), "play": list(plays)},
+        geometry=[Point(x,y) for x,y in zip(lons,lats)], crs=4326)
+    for b, win in _WINDOWS.items():
+        sub = pts[pts["play"]==b]
+        if sub.empty: continue
+        j = gpd.sjoin(sub, win, how="left", predicate="within").drop_duplicates("i")
+        for i, pw in zip(j["i"], j["PW"]):
+            out[i] = pw if isinstance(pw,str) else "Outside windows"
+    return out
+
 # ── drilled stick geometry from the PDP WellboreLocations.tsv: heel->toe per
 #    API10, matched to the deck's drilled wells, drawn on the map as the grey
 #    "Drilled PDP sticks" layer. Column names resolved case-insensitively. ──
@@ -160,6 +193,14 @@ else:
         D["drilled"]["geo"]=geo
         print(f"drilled sticks: {nhit:,} of {len(d):,} deck wells matched in WellboreLocations "
               f"(path col: {_w_pth or 'none — file order'})")
+        # phase window per drilled well from the stick midpoint (Quick-Eval grouping)
+        _mx=[(g[0]+g[2])/2 if g else 0.0 for g in geo]
+        _my=[(g[1]+g[3])/2 if g else 0.0 for g in geo]
+        _pw=classify_pw(_mx,_my,d["_play"].tolist())
+        _pw=[p if geo[i] else "Unknown" for i,p in enumerate(_pw)]
+        D["drilled"]["cats"]["Phase"]=cat(pd.Series(_pw))
+        from collections import Counter as _Ctr
+        print(f"drilled phase windows: {dict(_Ctr(_pw))}")
 
 # ── drilling pace from WellDetails.tsv: horizontal, non-permit wells bucketed
 #    by first-production HALF-YEAR. Fuels the Quick-Eval schedule prefill —
@@ -182,11 +223,14 @@ _c = {
   "county": _find(r"county"),
   "form":   _find(r"formation"),
 }
+_c_shla = _find(r"shl.?latitude", r"surface.?hole.?latitude", r"surface.?latitude")
+_c_shlo = _find(r"shl.?longitude", r"surface.?hole.?longitude", r"surface.?longitude")
 _missing = [k for k,v in _c.items() if v is None]
 if _missing:
     print(f"WellDetails pace SKIPPED — no column for {_missing}; available: {_hdr}")
 else:
-    wp = pd.read_csv(DATA/"WellDetails.tsv", sep="\t", dtype=str, usecols=list(set(_c.values())))
+    _use = list(set(_c.values()))+[c for c in (_c_shla,_c_shlo) if c]
+    wp = pd.read_csv(DATA/"WellDetails.tsv", sep="\t", dtype=str, usecols=_use)
     n0 = len(wp)
     hz = wp[_c["hz"]].astype(str).str.strip().str.lower()
     wp = wp[hz.isin(["t","true","1","y","yes","horizontal","h"])]
@@ -205,12 +249,20 @@ else:
         "state":  wp[_c["state"]].fillna("Unknown").astype(str).str.strip(),
         "county": wp[_c["county"]].fillna("Unknown").astype(str).str.strip(),
         "h":      hk.values})
+    # phase window from the surface hole location (pace prefill for PW groupings)
+    if _c_shla and _c_shlo:
+        _la=pd.to_numeric(wp[_c_shla],errors="coerce").fillna(0).tolist()
+        _lo=pd.to_numeric(wp[_c_shlo],errors="coerce").fillna(0).tolist()
+        tbl["pw"]=classify_pw(_lo,_la,tbl["play"].tolist())
+    else:
+        tbl["pw"]="Unknown"
+        print("WellDetails has no SHL lat/lon — pace phase windows set to Unknown")
     hpos = {k:i for i,k in enumerate(keep)}
     rows = {}
-    for (op,pl,st,co,hh),n in tbl.groupby(["op","play","state","county","h"]).size().items():
-        rows.setdefault((op,pl,st,co),[0]*len(keep))[hpos[hh]] = int(n)
+    for (op,pl,st,co,pw,hh),n in tbl.groupby(["op","play","state","county","pw","h"]).size().items():
+        rows.setdefault((op,pl,st,co,pw),[0]*len(keep))[hpos[hh]] = int(n)
     D["pace"] = {"halves":[hlab(k) for k in keep],
-                 "rows":[[op,pl,st,co,c] for (op,pl,st,co),c in sorted(rows.items())]}
+                 "rows":[[op,pl,st,co,pw,c] for (op,pl,st,co,pw),c in sorted(rows.items())]}
     print(f"drilling pace: {int(m.sum()):,} of {n0:,} WellDetails wells "
           f"(horizontal, non-permit, FPD {hlab(keep[0])}-{hlab(keep[-1])}) -> {len(rows):,} pace groups")
 

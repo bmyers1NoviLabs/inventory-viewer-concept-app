@@ -3717,7 +3717,13 @@ wedgeC.addEventListener("mouseleave",()=>tip.style.display="none");
 
 /* ── Quick-Eval: drill-out schedule panel ── */
 const QE_GROUPS=[["Basin",[]],["County",["County"]],["Operator-Play",["Operator","Play"]],
-  ["Play",["Play"]],["Operator-County",["Operator","County"]],["Operator-State",["Operator","State"]]];
+  ["Play",["Play"]],["Phase Window",["Phase"]],["Operator-County",["Operator","County"]],
+  ["Operator-State",["Operator","State"]],["Operator-Phase Window",["Operator","Phase"]],
+  ["Operator-Phase Window-County",["Operator","Phase","County"]]];
+/* a grouping is offered only when BOTH datasets carry its dims — the drilled
+   side builds the buckets, the undrilled side ranks the wells to spud */
+const QE_AVAIL=()=>QE_GROUPS.filter(([,ks])=>
+  ks.every(k=>D.cats[k]&&D.drilled&&D.drilled.cats[k]));
 let qeGroupBy="Basin";
 const QESCHED={};   /* groupBy -> {groupKey: number[22]} */
 const QE_PERIODS=(()=>{
@@ -3732,9 +3738,14 @@ const QE_PERIODS=(()=>{
   for(let yy=endY+1;yy<=endY+12;yy++) p.push([String(yy),4]);
   return p;
 })();
-{
+/* the group-by buttons are built lazily (from renderQE) because availability
+   depends on the data, which loads after this script parses */
+function buildQESeg(){
   const seg=document.getElementById("qegroupseg");
-  seg.innerHTML=QE_GROUPS.map(([g])=>
+  const avail=QE_AVAIL();
+  if(seg.childElementCount===avail.length) return;
+  if(!avail.some(([g])=>g===qeGroupBy)) qeGroupBy=avail.length?avail[0][0]:"Basin";
+  seg.innerHTML=avail.map(([g])=>
     `<button data-qg="${g}" aria-pressed="${g===qeGroupBy}">${g}</button>`).join("");
   seg.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
     qeGroupBy=b.dataset.qg;
@@ -3754,15 +3765,16 @@ function paceFor(keys,parts){
   let hi=-1,best=-Infinity;
   D.pace.halves.forEach((l,i)=>{const k=hk(l); if(k<=want&&k>best){best=k;hi=i;}});
   if(hi<0) hi=0;                              /* stale build — oldest half it has */
-  const DIM={Operator:0,Play:1,State:2,County:3};
+  const DIM={Operator:0,Play:1,State:2,County:3,Phase:4};
   const px=keys.map(k=>DIM[k]);
-  if(px.some(x=>x==null)) return null;        /* group dim the pace table lacks */
+  const dims=D.pace.rows.length?D.pace.rows[0].length-1:0;  /* counts sit last */
+  if(px.some(x=>x==null||x>=dims)) return null;  /* group dim the pace table lacks */
   const wantv=parts.map(p=>p.trim().toLowerCase());
   let n=0;
   for(const r of D.pace.rows){
     let ok=true;
     for(let j=0;j<px.length;j++) if(String(r[px[j]]).trim().toLowerCase()!==wantv[j]){ok=false;break;}
-    if(ok) n+=r[4][hi]||0;
+    if(ok) n+=r[dims][hi]||0;
   }
   const annual=n*2;
   return {half:D.pace.halves[hi].replace("H"," H"), n, annual,
@@ -3771,6 +3783,7 @@ function paceFor(keys,parts){
 function renderQE(){
   const host=document.getElementById("qegroups");
   if(!D.drilled){ host.innerHTML=""; return; }
+  buildQESeg();
   const keys=QE_GROUPS.find(g=>g[0]===qeGroupBy)[1];
   const cats=keys.map(k=>D.drilled.cats[k]);
   const yr=drilledMetricOk("First Production Year")?DV("First Production Year"):null;
