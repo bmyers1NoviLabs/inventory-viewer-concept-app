@@ -197,6 +197,7 @@ APP_BUILD_LOCALS = [
     "data/econ/drilled_{basin}.zip",
     "data/Undrilled_{basin}_WellboreLocations.csv",
     "data/WellDetails.tsv",
+    "data/WellboreLocations.tsv",
 ]
 BUILD_STEPS = ["build_welldata.py", "build_pads.py", "build_drilled.py", "assemble.py"]
 

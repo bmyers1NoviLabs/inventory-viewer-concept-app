@@ -1735,9 +1735,10 @@ function updateCount(){
 }
 
 /* ── map layers menu ── */
-const LAYERS={counties:true,states:true,windows:true,labels:true};
+const LAYERS={counties:true,states:true,windows:true,labels:true,pdp:true};
 const LAYER_DEFS=[["counties","County outlines"],["states","State borders"],
-                  ["windows","Phase windows"],["labels","Window labels"]];
+                  ["windows","Phase windows"],["labels","Window labels"],
+                  ["pdp","Drilled PDP sticks"]];
 const USERLAYERS=[];   /* dropped shapefiles: {name,type,shapes,color,on} */
 const lm=document.getElementById("layermenu");
 function rebuildLayerMenu(){
@@ -1948,6 +1949,19 @@ function drawMap(){
       for(const wn of BM.windows) if(ap.has(wn.p))
         mapX.fillText(wn.n.toUpperCase(), px(wn.c[0]), py(wn.c[1]));
     }
+  }
+  /* drilled PDP sticks — quiet grey context layer under the coloured wells,
+     honouring the drilled-side filters (SELD) */
+  if(LAYERS.pdp&&D.drilled&&D.drilled.geo){
+    const G=D.drilled.geo;
+    mapX.lineWidth=Math.max(.6,Math.min(1.8,view.k*.6))*d; mapX.lineCap="round";
+    mapX.beginPath();
+    for(let i=0;i<D.drilled.n;i++){
+      if(!SELD[i]) continue;
+      const g=G[i]; if(!g) continue;
+      mapX.moveTo(px(g[0]),py(g[1])); mapX.lineTo(px(g[2]),py(g[3]));
+    }
+    mapX.globalAlpha=.55; mapX.strokeStyle=css("--nan"); mapX.stroke(); mapX.globalAlpha=1;
   }
   if(CATC){
     /* categorical colour-by */

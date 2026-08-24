@@ -118,6 +118,49 @@ D["drilled"] = {
 }
 open(OUT/"drilled_api_order.txt","w").write("\n".join(d["_k"]))  # wedge matrix row order
 
+# ── drilled stick geometry from the PDP WellboreLocations.tsv: heel->toe per
+#    API10, matched to the deck's drilled wells, drawn on the map as the grey
+#    "Drilled PDP sticks" layer. Column names resolved case-insensitively. ──
+import re as _re0
+_WBL = DATA/"WellboreLocations.tsv"
+if not _WBL.exists():
+    print("WellboreLocations.tsv not found — drilled map sticks SKIPPED")
+else:
+    _wcols = pd.read_csv(_WBL, sep="\t", nrows=0).columns.tolist()
+    def _wfind(*pats):
+        for p in pats:
+            for c in _wcols:
+                if _re0.fullmatch(p, c.strip(), _re0.I): return c
+        return None
+    _w_id  = _wfind(r"api.?10", r"api", r"uwi", r"novi.?wellname", r"unique.?id")
+    _w_lat = _wfind(r"latitude", r"lat")
+    _w_lon = _wfind(r"longitude", r"lon(g)?")
+    _w_pth = _wfind(r"path", r"md", r"measured.?depth", r"point.?(order|seq\w*)", r"sequence")
+    if not (_w_id and _w_lat and _w_lon):
+        print(f"WellboreLocations pace columns missing (id={_w_id} lat={_w_lat} lon={_w_lon}); "
+              f"available: {_wcols} — drilled map sticks SKIPPED")
+    else:
+        _use=[c for c in {_w_id,_w_lat,_w_lon,_w_pth} if c]
+        wl = pd.read_csv(_WBL, sep="\t", usecols=_use, dtype={_w_id:str})
+        wl[_w_lat]=pd.to_numeric(wl[_w_lat],errors="coerce")
+        wl[_w_lon]=pd.to_numeric(wl[_w_lon],errors="coerce")
+        wl = wl.dropna(subset=[_w_lat,_w_lon])
+        wl["_k"]=wl[_w_id].astype(str).str.strip()
+        keep=set(d["_k"])
+        wl = wl[wl["_k"].isin(keep)]                      # only the deck's drilled wells
+        if _w_pth:
+            wl[_w_pth]=pd.to_numeric(wl[_w_pth],errors="coerce")
+            wl = wl.dropna(subset=[_w_pth]).sort_values(["_k",_w_pth])
+        g = wl.groupby("_k",sort=False)
+        heel, toe = g.first(), g.last()
+        gm = {k:[round(float(heel[_w_lon][k]),5),round(float(heel[_w_lat][k]),5),
+                 round(float(toe[_w_lon][k]),5), round(float(toe[_w_lat][k]),5)] for k in heel.index}
+        geo=[gm.get(k) for k in d["_k"]]
+        nhit=sum(1 for x in geo if x)
+        D["drilled"]["geo"]=geo
+        print(f"drilled sticks: {nhit:,} of {len(d):,} deck wells matched in WellboreLocations "
+              f"(path col: {_w_pth or 'none — file order'})")
+
 # ── drilling pace from WellDetails.tsv: horizontal, non-permit wells bucketed
 #    by first-production HALF-YEAR. Fuels the Quick-Eval schedule prefill —
 #    the page picks the last full half (9 months back), annualizes it (x2)
