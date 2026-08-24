@@ -1256,13 +1256,35 @@ const fsel={};
 const CFGKEY="novi_appalachia_dash_v1";
 const CANSRV=/^https?:$/.test(location.protocol);
 let SRV=false;
+function cloneSched(src){
+  const out={};
+  for(const g in src){
+    out[g]={};
+    for(const k in src[g]) out[g][k]=src[g][k].slice();
+  }
+  return out;
+}
+function currentQI(){
+  const out={};
+  document.querySelectorAll('#qeinputs input[id^="qi-"]').forEach(inp=>{
+    const v=parseFloat(inp.value);
+    if(isFinite(v)) out[inp.id.slice(3)]=v;
+  });
+  return Object.keys(out).length?out:null;
+}
 function currentCfg(){
   /* persist only narrowed selections — a fully-selected filter is the default */
   const sel={};
   for(const c in fsel) if(fsel[c]&&fsel[c].size<D.cats[c].levels.length)
     sel[c]=[...fsel[c]].map(ix=>D.cats[c].levels[ix]);
   return {v:7,ramp:MAPRAMP,cats:sidebarCats.slice(),nums:sidebarNums.slice(),sel,
-    ranges:NUMF.map(f=>({m:f.metric,lo:f.lo,hi:f.hi,nan:f.keepNaN!==false}))};
+    ranges:NUMF.map(f=>({m:f.metric,lo:f.lo,hi:f.hi,nan:f.keepNaN!==false})),
+    /* scenario + Quick-Eval state so a saved project restores every tab.
+       QESCHED is DEEP-COPIED — a saved project must not alias live state, or
+       editing (or resetting) a schedule would rewrite projects already saved */
+    den:DENSITY==null?"":DENSITY, deck:CURDECK,
+    qe:{groupBy:qeGroupBy, sched:cloneSched(QESCHED),
+        inputs:(typeof qiBuilt!=="undefined"&&qiBuilt)?currentQI():(PREQI||undefined)}};
 }
 let cfgDeb;
 function saveCfg(){
@@ -1284,12 +1306,18 @@ async function loadCfg(){
   }catch(e){}
   try{ return JSON.parse(localStorage.getItem(CFGKEY)||"null"); }catch(e){ return null; }
 }
-let PRESEL=null, PRERANGE=null;
+let PRESEL=null, PRERANGE=null, PREQE=null, PREQI=null, PREDECK=null;
 function applyCfg(cfg){
   sidebarCats=DEFAULT_CATS.filter(c=>D.cats[c]);
   sidebarNums=DEFAULT_NUMS.filter(m=>D.metrics.includes(m));
-  PRESEL=null; PRERANGE=null;
+  PRESEL=null; PRERANGE=null; PREQE=null; PREQI=null;
+  DENSITY=null; DENSET=false;           /* back to the Base Case default */
+  PREDECK=D.priceDeck;                  /* back to the primary price deck */
   if(cfg){
+    PREQE=cfg.qe||null;
+    if(PREQE&&PREQE.inputs) PREQI=PREQE.inputs;
+    if(cfg.den!==undefined){ DENSITY=cfg.den===""?null:cfg.den; DENSET=true; }
+    if(cfg.deck) PREDECK=cfg.deck;
     if(Array.isArray(cfg.cats)) sidebarCats=cfg.cats.filter(c=>D.cats[c]);
     if(Array.isArray(cfg.nums)) sidebarNums=cfg.nums.filter(m=>D.metrics.includes(m));
     /* v1 configs were saved before Play joined the default set */
@@ -1640,7 +1668,11 @@ function ensureChartMetrics(){
 }
 function rebuildFromConfig(){
   buildSidebar(); rebuildNumBlocks(); rebuildChartSelects();
-  ensureChartMetrics(); applyFilters();
+  ensureChartMetrics();
+  initScenario();                       /* deck + density selects follow the config */
+  applyQE();                            /* drill-out schedules, grouping, model inputs */
+  if(PREDECK&&PREDECK!==CURDECK) setDeck(PREDECK);
+  applyFilters();
 }
 document.getElementById("mf-apply").addEventListener("click",()=>{
   /* keep live selections on filters that survive the change */
@@ -1685,7 +1717,7 @@ function fullSel(cat){
 const PADFCATS=["Play","County","State","Operator","Subbasin"];
 
 /* ── high-level scenario: price deck + density (the box above the drawer) ── */
-let DENSITY=null, CURDECK=null, PRIMARYQ=null;
+let DENSITY=null, DENSET=false, CURDECK=null, PRIMARYQ=null;
 function updateSubtitle(){
   document.getElementById("subtitle").textContent =
     "Utica + Marcellus · " + D.n.toLocaleString() + " undrilled · " +
@@ -1726,12 +1758,12 @@ function initScenario(){
   ds.disabled=decks.length<2;
   ds.title=decks.length<2?"This build carries one price deck":"Switch every metric, filter and chart to this price deck's economics";
   const dens=D.cats.Inventory?D.cats.Inventory.levels.filter(l=>l!=="PDP"):[];
-  if(DENSITY===null&&dens.includes("Base Case")) DENSITY="Base Case";
+  if(!DENSET){ DENSITY=dens.includes("Base Case")?"Base Case":null; DENSET=true; }
   dn.innerHTML=dens.map(l=>`<option${l===DENSITY?" selected":""}>${esc(l)}</option>`).join("")
     +`<option value="__all__"${DENSITY?"":" selected"}>All scenarios</option>`;
   dn.title="Which undrilled density scenario is in play — PDP wells are unaffected";
   ds.onchange=()=>setDeck(ds.value);
-  dn.onchange=()=>{ DENSITY=dn.value==="__all__"?null:dn.value; applyFilters(); };
+  dn.onchange=()=>{ DENSITY=dn.value==="__all__"?null:dn.value; DENSET=true; applyFilters(); };
 }
 function applyFilters(){
   nSel=0;
@@ -3882,15 +3914,36 @@ const QE_PERIODS=(()=>{
 function buildQESeg(){
   const seg=document.getElementById("qegroupseg");
   const avail=QE_AVAIL();
-  if(seg.childElementCount===avail.length) return;
+  if(seg.childElementCount===avail.length){
+    seg.querySelectorAll("button").forEach(x=>
+      x.setAttribute("aria-pressed",x.dataset.qg===qeGroupBy));
+    return;
+  }
   if(!avail.some(([g])=>g===qeGroupBy)) qeGroupBy=avail.length?avail[0][0]:"Basin";
   seg.innerHTML=avail.map(([g])=>
     `<button data-qg="${g}" aria-pressed="${g===qeGroupBy}">${g}</button>`).join("");
   seg.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
     qeGroupBy=b.dataset.qg;
     seg.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));
-    renderQE();
+    renderQE(); saveCfg();
   }));
+}
+/* restore a saved project's drill-out state — schedules, grouping, model inputs */
+function applyQE(){
+  for(const k in QESCHED) delete QESCHED[k];
+  qeGroupBy="Basin";
+  if(PREQE){
+    if(PREQE.sched) for(const g in PREQE.sched){
+      const gs=PREQE.sched[g];
+      if(!gs||typeof gs!=="object") continue;
+      QESCHED[g]={};
+      for(const key in gs) if(Array.isArray(gs[key]))
+        QESCHED[g][key]=gs[key].map(x=>+x||0);
+    }
+    if(PREQE.groupBy&&QE_GROUPS.some(x=>x[0]===PREQE.groupBy)) qeGroupBy=PREQE.groupBy;
+  }
+  if(qiBuilt){ resetQIvals(); setQIvals(PREQI); }
+  renderQE();
 }
 /* actual drilling pace for a schedule group, from the WellDetails table baked
    in at build time (horizontal wells, non-permit status, by first-production
@@ -3968,6 +4021,7 @@ function renderQE(){
       const v=Math.max(0,Math.round((parseFloat(inp.value)||0)*10)/10);  /* fractional wells allowed */
       inp.value=v;
       sched[x.dataset.key][+inp.dataset.j]=v;
+      saveCfg();                       /* schedules ride along with the session + projects */
     }));
   });
 }
@@ -4024,8 +4078,20 @@ const QI_DEFS=[
     PURITY.map((k,i)=>["p_"+k,PURITY_LABEL[k],[8.40,28,35,49,59.50][i]])],
 ];
 let qiBuilt=false, QERES=null;
+function setQIvals(vals){
+  if(!vals) return;
+  document.querySelectorAll('#qeinputs input[id^="qi-"]').forEach(inp=>{
+    const k=inp.id.slice(3);
+    if(vals[k]!=null&&isFinite(vals[k])) inp.value=vals[k];
+  });
+}
+function resetQIvals(){
+  QI_DEFS.forEach(([,items])=>items.forEach(([id,,v])=>{
+    const el=document.getElementById("qi-"+id); if(el) el.value=v;
+  }));
+}
 function buildQI(){
-  if(qiBuilt) return;
+  if(qiBuilt){ return; }
   qiBuilt=true;
   const host=document.getElementById("qeinputs");
   host.innerHTML=QI_DEFS.map(([sec,items])=>
@@ -4037,6 +4103,9 @@ function buildQI(){
       matching the 70_3 deck; oil, dry gas and NGL each blown down from their own wedge stream,
       scheduled undrilled wells layered on their actual three-stream forecast curves
       (best NPV10 first), D&C capex at spud</div><div id="qeres"></div>`;
+  if(PREQI) setQIvals(PREQI);          /* saved project's model inputs */
+  host.querySelectorAll('input[id^="qi-"]').forEach(inp=>
+    inp.addEventListener("change",saveCfg));
 }
 function qiv(id){ return parseFloat(document.getElementById("qi-"+id).value)||0; }
 /* monthly spud quotas per group from the active schedule (partials preserved) */
@@ -4312,7 +4381,7 @@ document.getElementById("qe-report").addEventListener("click",qeReport);
    re-derives the defaults (drilling pace, or the last-year fallback) */
 document.getElementById("qe-reset").addEventListener("click",()=>{
   delete QESCHED[qeGroupBy];
-  renderQE();
+  renderQE(); saveCfg();
 });
 
 document.getElementById("qe-export").addEventListener("click",()=>{
@@ -4964,7 +5033,6 @@ window.addEventListener("resize",()=>{ clearTimeout(rsz); rsz=setTimeout(redrawA
   if(D.drilled) SELD=new Uint8Array(D.drilled.n).fill(1);
   buildFPY(); extendInventory(); buildIRRTier(); renameQuartiles();
   computeBounds();
-  initScenario();
   updateSubtitle();
   MV.padcolor="Total NPV10";
   let stashWellColor="Total NPV10";
@@ -5046,6 +5114,7 @@ window.addEventListener("resize",()=>{ clearTimeout(rsz); rsz=setTimeout(redrawA
   rebuildNumBlocks();
   rebuildChartSelects();
   ensureChartMetrics();
+  initScenario();              /* after applyCfg so the density default lands */
   /* add-numeric-filter picker */
   makeCombo("numpick","",m=>{
     document.getElementById("numpick").style.display="none";

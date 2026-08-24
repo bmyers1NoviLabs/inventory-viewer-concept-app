@@ -75,6 +75,9 @@ for basin in BASINS:
         if not econ.exists():
             z = DATA/f"econ/undrilled_{basin}.zip"
             alt = DATA/f"econ/undrilled_{basin.lower()}.zip"
+            if not (z.exists() or alt.exists()):
+                print(f"{basin}: no combined export and no undrilled zip — skipping this basin")
+                continue
             unzip_to(z if z.exists() else alt, econ)
         e  = pd.read_csv(econ/"Economics/economics_all.csv", low_memory=False)
         dp = pd.read_csv(econ/"Data/data_plus.csv", low_memory=False)

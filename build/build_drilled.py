@@ -90,6 +90,9 @@ for b in BASINS:
     econ=DATA/f"econ/drilled_{b.lower()}"
     if not econ.exists():
         z=DATA/f"econ/drilled_{b}.zip"; alt=DATA/f"econ/drilled_{b.lower()}.zip"
+        if not (z.exists() or alt.exists()):
+            print(f"{b}: no combined export and no drilled zip — skipping this basin")
+            continue
         _unzip(z if z.exists() else alt, econ)
     parts.append(load(econ/"Economics/economics_all.csv", b))
 d = pd.concat(parts, ignore_index=True)
@@ -105,7 +108,7 @@ fixed = d["_k"].map(opmap)
 n_fix = int((fixed.notna() & (fixed != d["Operator"].astype(str))).sum())
 d["Operator"] = fixed.fillna(d["Operator"])
 print(f"operator corrected from WellDetails on {n_fix:,} of {len(d):,} drilled wells")
-print(f"{' + '.join(f'{b} run {len(x):,}' for b, x in zip(BASINS, parts))} -> unique drilled {len(d):,}")
+print(f"{' + '.join(f'run {len(x):,}' for x in parts)} -> unique drilled {len(d):,}")
 print("play:", d["_play"].value_counts().to_dict())
 print("formations:", d["_form"].value_counts().head(8).to_dict())
 

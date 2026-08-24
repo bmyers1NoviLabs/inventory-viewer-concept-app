@@ -202,12 +202,21 @@ APP_BUILD_LOCALS = [
 ]
 BUILD_STEPS = ["build_welldata.py", "build_pads.py", "build_drilled.py", "assemble.py"]
 
+# the econ export exists in two shapes: the combined one-file {basin}_all zip,
+# or the older split undrilled/drilled pair. A basin needs ONE of them, so each
+# is optional on its own and the pair is checked per basin below.
+ECON_ALT = {
+    "data/econ/all_{basin}.zip": ["data/econ/undrilled_{basin}.zip", "data/econ/drilled_{basin}.zip"],
+    "data/econ/undrilled_{basin}.zip": ["data/econ/all_{basin}.zip"],
+    "data/econ/drilled_{basin}.zip": ["data/econ/all_{basin}.zip"],
+}
+
 def rebuild_app(s3, cfg, force=False):
     global DASH
     basins = cfg.get("basins", [""])
     by_local = {src["local"]: src["s3"] for src in cfg.get("sources", [])}
     optional = {src["local"] for src in cfg.get("sources", []) if src.get("optional")}
-    plan, stamps = [], {}
+    plan, stamps, got = [], {}, set()
     for tpl in APP_BUILD_LOCALS:
         uri = by_local.get(tpl)
         if uri is None:
@@ -219,12 +228,20 @@ def rebuild_app(s3, cfg, force=False):
                 bucket, key = _resolve_uri(s3, uri, basin)
                 stamps[str(local.relative_to(ROOT))] = _stamp(s3, bucket, key)
                 plan.append((local, bucket, key))
+                got.add((tpl, basin))
             except Exception as e:
-                if tpl in optional:
-                    print(f"  app rebuild: optional source {tpl} not on S3 for {basin!r} — building without it")
+                if tpl in optional or tpl in ECON_ALT:
+                    print(f"  app rebuild: {tpl} not on S3 for {basin!r} — continuing without it")
                     continue
                 print(f"  app rebuild: cannot resolve {tpl} for {basin!r} ({e}) — skipping the rebuild")
                 return
+    # every basin must have arrived through one econ shape or the other
+    for basin in basins:
+        if ("data/econ/all_{basin}.zip", basin) in got: continue
+        if all((t, basin) in got for t in ECON_ALT["data/econ/all_{basin}.zip"]): continue
+        print(f"  app rebuild: {basin} has neither the combined {basin}_all export nor the "
+              f"undrilled+drilled pair on S3 — skipping the rebuild")
+        return
     if not force and APP_STAMP.exists():
         try:
             if json.loads(APP_STAMP.read_text()) == stamps and DASH is not None:
