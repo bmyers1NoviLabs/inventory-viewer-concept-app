@@ -616,6 +616,11 @@ class H(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if path == "/favicon.ico":                  # no icon file; stop 404 noise
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path in ("/", "/index.html") and DASH:
             self.path = "/" + DASH.name
         return super().do_GET()
@@ -647,8 +652,15 @@ class H(SimpleHTTPRequestHandler):
         return self._json(404, {"error": "unknown endpoint"})
 
     def log_message(self, fmt, *a):                 # quieter logs
-        if "/api/" in (a[0] if a else ""):
-            sys.stderr.write("%s %s\n" % (self.address_string(), a[0]))
+        # send_error() routes through here with (code, message) args, where
+        # code is an HTTPStatus — format defensively or the 404 path itself
+        # raises and the client gets a dropped connection instead of the error
+        try:
+            line = fmt % a
+        except Exception:
+            line = " ".join(str(x) for x in a)
+        if "/api/" in line:
+            sys.stderr.write("%s %s\n" % (self.address_string(), line))
 
 if __name__ == "__main__":
     # nohup > build.log block-buffers stdout, which makes a 40-minute first
