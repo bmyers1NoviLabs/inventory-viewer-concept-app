@@ -44,6 +44,8 @@
   }
   * { box-sizing:border-box; }
   html,body { height:100%; }
+  /* native form controls do not inherit the body font on their own */
+  button, input, select, textarea, optgroup, option { font-family: Poppins,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
   body { margin:0; background:var(--page); color:var(--ink);
          font:14px/1.45 Poppins,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
          display:flex; flex-direction:column; overflow:hidden; }
@@ -560,6 +562,8 @@
           <span class="t" style="margin-right:auto">Avg by first-prod year</span>
           <div class="combo" id="t2-metric"></div>
           <select id="t2-split" aria-label="Split"></select>
+          <button class="xlbtn" id="t2-band" aria-pressed="true"
+            title="Toggle the P25–P75 bands">bands</button>
         </div>
         <div class="chartbox"><canvas id="trend"></canvas></div>
       </div>
@@ -1109,7 +1113,7 @@ function makeCombo(id, initial, onchange, groupsFn){
 /* ── filter configuration: base preloaded set + user-managed via the ⚙ modal ── */
 const CATLABEL={Play:"Play",Subbasin:"Subbasin",Formation:"Formation",County:"County",
   State:"State",Phase:"Phase window",Operator:"Operator",Inventory:"Inventory Type",
-  IRRTier:"IRR Tier",RQQ:"ML Rock Quality Quartile",FPY:"First Prod Year"};
+  IRRTier:"IRR Tier",RQQ:"ML Rock Quality Quartile",FPY:"First Production Year"};
 const LBL2CAT={Basin:"Play","Rock Quality":"RQQ"};  /* label -> D.cats key (+legacy aliases) */
 for(const k in CATLABEL){ LBL2CAT[CATLABEL[k]]=k; LBL2CAT[k]=k; }
 const ALLCATS=Object.keys(CATLABEL);
@@ -2167,7 +2171,15 @@ function splitSets(metric,split,withLat){
   const v=V(metric), lat=withLat?V("Lateral Length"):null;
   split=split?LBL2CAT[split]||split:split;
   let groups=[["All",null]];
-  if(split) groups=D.cats[split].levels.map((L,ix)=>[L,ix]);
+  if(split){
+    /* top 5 by well count under the current filter — not alphabetical */
+    const cat=D.cats[split];
+    const cnt=new Array(cat.levels.length).fill(0);
+    for(let i=0;i<D.n;i++) if(SEL[i]) cnt[cat.ix[i]]++;
+    groups=[...cnt.keys()].filter(ix=>cnt[ix]>0)
+      .sort((a,b)=>cnt[b]-cnt[a]).slice(0,5)
+      .map(ix=>[cat.levels[ix],ix]);
+  }
   return groups.map(([L,ix])=>{
     const a=[], wts=withLat?[]:null;
     for(let i=0;i<D.n;i++){
@@ -2178,7 +2190,7 @@ function splitSets(metric,split,withLat){
       if(withLat) wts.push(isFinite(lat[i])?lat[i]:0);
     }
     return {label:L,vals:a,wts};
-  }).filter(s=>s.vals.length>1).slice(0,4);
+  }).filter(s=>s.vals.length>1).slice(0,5);
 }
 function axisX(ctx,x0,x1,ML,MR,MT,MB,w,h,d,label){
   /* ppt style: black axis line, outside ticks, bold axis title */
@@ -2920,6 +2932,7 @@ dvuC.addEventListener("mouseleave",()=>tip.style.display="none");
 const arrC=document.getElementById("arrow"), arrX=arrC.getContext("2d");
 const trC=document.getElementById("trend"), trX=trC.getContext("2d");
 let arrGeom=null, trGeom=null;
+let TRENDBANDS=true;   /* P25–P75 bands on the trend chart; toggled in the head */
 function drilledMetricOk(m){ return !!(D.drilled&&D.drilled.metrics.includes(m)); }
 function drilledChartGroups(){
   return chartGroups()
@@ -3027,8 +3040,8 @@ function drawTrend(){
   const MINW=10;
   const stat=a=>{ a.sort((x,y)=>x-y);
     return {v:a.reduce((s,x)=>s+x,0)/a.length,
-            p10:a[Math.floor(a.length*.1)],
-            p90:a[Math.min(a.length-1,Math.floor(a.length*.9))],
+            lo:a[Math.floor(a.length*.25)],
+            hi:a[Math.min(a.length-1,Math.floor(a.length*.75))],
             n:a.length}; };
   const series=seriesDef.map(sd=>{
     const agg=new Map();
@@ -3072,8 +3085,11 @@ function drawTrend(){
     }
   }
   const allYr=series.flatMap(s=>s.pts.map(p=>p.yr));
-  const allV=series.flatMap(s=>s.pts.flatMap(p=>[p.p10,p.p90]))
-    .concat(series.filter(s=>s.u).flatMap(s=>[s.u.p10,s.u.p90]));
+  const allV=TRENDBANDS
+    ? series.flatMap(s=>s.pts.flatMap(p=>[p.lo,p.hi]))
+        .concat(series.filter(s=>s.u).flatMap(s=>[s.u.lo,s.u.hi]))
+    : series.flatMap(s=>s.pts.map(p=>p.v))
+        .concat(series.filter(s=>s.u).map(s=>s.u.v));
   let x0=Math.min(...allYr),x1=Math.max(...allYr);
   let y0=Math.min(...allV),y1=Math.max(...allV);
   const py=(y1-y0)*.1||Math.abs(y1)*.1||1; y0-=py; y1+=py;
@@ -3115,12 +3131,14 @@ function drawTrend(){
     trX.beginPath(); trX.strokeStyle=ink; trX.moveTo(ML-3*d,Y(yv)); trX.lineTo(ML,Y(yv)); trX.stroke(); }
   series.forEach((s,ci)=>{
     const st=seriesStyle(ci);
-    /* P10–P90 band under the mean line */
+    /* P25–P75 band under the mean line (toggle in the card head) */
+    if(TRENDBANDS){
     trX.beginPath();
-    s.pts.forEach((p,i)=>{ const gx=X(p.yr),gy=Y(p.p90); i?trX.lineTo(gx,gy):trX.moveTo(gx,gy); });
-    for(let i=s.pts.length-1;i>=0;i--) trX.lineTo(X(s.pts[i].yr),Y(s.pts[i].p10));
+    s.pts.forEach((p,i)=>{ const gx=X(p.yr),gy=Y(p.hi); i?trX.lineTo(gx,gy):trX.moveTo(gx,gy); });
+    for(let i=s.pts.length-1;i>=0;i--) trX.lineTo(X(s.pts[i].yr),Y(s.pts[i].lo));
     trX.closePath();
     trX.globalAlpha=series.length>1?.10:.16; trX.fillStyle=st.color; trX.fill(); trX.globalAlpha=1;
+    }
     trX.strokeStyle=st.color; trX.lineWidth=2.2*d;
     trX.beginPath();
     s.pts.forEach((p,i)=>{ const gx=X(p.yr),gy=Y(p.v); i?trX.lineTo(gx,gy):trX.moveTo(gx,gy); });
@@ -3130,7 +3148,7 @@ function drawTrend(){
     if(s.u){
       /* undrilled spread as a whisker behind the diamond */
       trX.globalAlpha=.55; trX.strokeStyle=st.color; trX.lineWidth=3.5*d;
-      trX.beginPath(); trX.moveTo(X(xU),Y(s.u.p10)); trX.lineTo(X(xU),Y(s.u.p90)); trX.stroke();
+      if(TRENDBANDS){ trX.beginPath(); trX.moveTo(X(xU),Y(s.u.lo)); trX.lineTo(X(xU),Y(s.u.hi)); trX.stroke(); }
       trX.globalAlpha=1;
     }
     if(s.u){
@@ -3161,7 +3179,7 @@ function drawTrend(){
   const ttl=`Avg ${metric}`.slice(0,48);
   trX.fillText(ttl,6*d,13*d);
   trX.fillStyle=css("--muted"); trX.font=`${9.5*d}px Poppins,system-ui,sans-serif`;
-  trX.fillText("band = P10–P90",8*d+trX.measureText(ttl).width*1.35,13*d);
+  if(TRENDBANDS) trX.fillText("band = P25–P75",8*d+trX.measureText(ttl).width*1.35,13*d);
   trX.fillStyle=ink; trX.font=`700 ${11*d}px Poppins,system-ui,sans-serif`;
   trX.textAlign="center"; trX.fillText("First production year",ML+(w-ML-MR)/2,h-6*d);
   trGeom={series,X,Y,d,metric,x0,x1,xU,hasU};
@@ -3184,7 +3202,7 @@ trC.addEventListener("mousemove",e=>{
   const d=trGeom.d, mx=e.offsetX*d;
   /* right of the divider = the Undrilled point */
   const row=(L,p)=>`<tr><td>${L}</td><td>${fmt(p.v)}
-    <small style="color:var(--muted)">(P10 ${fmt(p.p10)} · P90 ${fmt(p.p90)})</small>
+    <small style="color:var(--muted)">(P25 ${fmt(p.lo)} · P75 ${fmt(p.hi)})</small>
     · ${p.n.toLocaleString()} wells</td></tr>`;
   if(trGeom.hasU&&mx>trGeom.X((trGeom.x1+trGeom.xU)/2)){
     const rows=trGeom.series.map(s=>s.u?row(s.label,s.u):"").join("");
@@ -3801,14 +3819,14 @@ function scheduleQuotas(eff){
     QE_PERIODS.forEach(([lab,mult],j)=>{
       const w=sched[key][j]||0;
       if(!w) return;
-      if(mult===1){ /* quarter: Qn-YYYY -> 3 months */
-        const qn=+lab[1], yr=+lab.slice(3);
-        const m0=yr*12+(qn-1)*3;
-        for(let k=0;k<3;k++){ const t=m0+k-eff; if(t>=0&&t<400) q[t]+=w/3; }
-      } else {       /* year -> 12 months */
-        const yr=+lab, m0=yr*12;
-        for(let k=0;k<12;k++){ const t=m0+k-eff; if(t>=0&&t<400) q[t]+=w/12; }
-      }
+      /* spread the period's wells over its months that are still ahead of the
+         effective date — "3 wells this quarter" spuds 3 wells even when the
+         quarter is already underway (they cram into the remaining months) */
+      const m0=mult===1?(+lab.slice(3))*12+((+lab[1])-1)*3:(+lab)*12;
+      const span=mult===1?3:12;
+      const ts=[];
+      for(let k=0;k<span;k++){ const t=m0+k-eff; if(t>=0&&t<400) ts.push(t); }
+      if(ts.length) for(const t of ts) q[t]+=w/ts.length;
     });
     out[key]=q;
   }
@@ -4671,6 +4689,11 @@ window.addEventListener("resize",()=>{ clearTimeout(rsz); rsz=setTimeout(redrawA
     drawChart2();
   }));
   document.getElementById("c1-split").addEventListener("change",drawChart1);
+  document.getElementById("t2-band").addEventListener("click",()=>{
+    TRENDBANDS=!TRENDBANDS;
+    document.getElementById("t2-band").setAttribute("aria-pressed",TRENDBANDS);
+    drawTrend();
+  });
   document.getElementById("c1-measure").addEventListener("change",drawChart1);
   document.getElementById("c2-group").addEventListener("change",drawChart2);
   makeCombo("c2-metric2","Gas Two Year Breakeven",drawChart2,chartGroups);
