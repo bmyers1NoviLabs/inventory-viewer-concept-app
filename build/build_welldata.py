@@ -34,14 +34,51 @@ def shp_glob(folder):
     return sorted(glob.glob(str(folder/"**"/"*.shp"), recursive=True))
 
 frames, windows_out = [], []
+CFG = json.loads((ROOT/"deploy_config.json").read_text())
+PRIMARY_DECK = str(CFG.get("price_deck") or "")
+
+def combined_dir(basin):
+    """the new one-file export (drilled + undrilled + all price decks):
+       data/econ/all_{basin}.zip / {basin}_all.zip, or a pre-extracted folder.
+       Returns the folder that holds Economics/economics_all.csv, else None."""
+    for z in (DATA/f"econ/all_{basin}.zip", DATA/f"econ/{basin}_all.zip"):
+        if z.exists():
+            unzip_to(z, DATA/f"econ/all_{basin.lower()}"); break
+    d = DATA/f"econ/all_{basin.lower()}"
+    if not d.exists(): return None
+    hits = sorted(glob.glob(str(d/"**"/"economics_all.csv"), recursive=True))
+    return Path(hits[0]).parents[1] if hits else None
+
+ALT_FRAMES = {}          # deck -> [per-basin undrilled frames] for non-primary decks
+DECKS_SEEN = []
+
 for basin in BASINS:
-    econ = DATA/f"econ/undrilled_{basin.lower()}"
-    if not econ.exists():
-        z = DATA/f"econ/undrilled_{basin}.zip"
-        alt = DATA/f"econ/undrilled_{basin.lower()}.zip"
-        unzip_to(z if z.exists() else alt, econ)
-    e  = pd.read_csv(econ/"Economics/economics_all.csv", low_memory=False)
-    dp = pd.read_csv(econ/"Data/data_plus.csv", low_memory=False)
+    comb = combined_dir(basin)
+    if comb:
+        e  = pd.read_csv(comb/"Economics/economics_all.csv", low_memory=False)
+        dp = pd.read_csv(comb/"Data/data_plus.csv", low_memory=False)
+        e["_inv_file"] = e["Inventory Type"].astype(str).str.strip()
+        e = e[e["_inv_file"] != "PDP"].copy()          # undrilled = non-PDP rows
+        dk = e["Price Deck"].astype(str).str.strip() if "Price Deck" in e else pd.Series("?",index=e.index)
+        decks = sorted(dk.unique())
+        primary = PRIMARY_DECK if PRIMARY_DECK in decks else decks[0]
+        for x in decks:
+            if x not in DECKS_SEEN: DECKS_SEEN.append(x)
+        for x in decks:
+            if x != primary:
+                ALT_FRAMES.setdefault(x, []).append(e[dk == x].copy())
+        e = e[dk == primary].copy()
+        print(f"{basin}: combined export {comb.name} — undrilled {len(e):,} "
+              f"| decks {decks} (primary {primary})")
+    else:
+        econ = DATA/f"econ/undrilled_{basin.lower()}"
+        if not econ.exists():
+            z = DATA/f"econ/undrilled_{basin}.zip"
+            alt = DATA/f"econ/undrilled_{basin.lower()}.zip"
+            unzip_to(z if z.exists() else alt, econ)
+        e  = pd.read_csv(econ/"Economics/economics_all.csv", low_memory=False)
+        dp = pd.read_csv(econ/"Data/data_plus.csv", low_memory=False)
+        e["_inv_file"] = np.nan                        # old export: classify by polygon below
     e["_k"]  = e["Unique ID"].astype(str).str.strip()
     dp["_k"] = dp["Unique ID"].astype(str).str.strip()
     e = e.merge(dp.drop(columns=["Unique ID"]), on="_k", how="left", suffixes=("", " [d+]"))
@@ -107,9 +144,12 @@ if pr_frames:
     hit=hit[hit["_form"]==hit["form"]].drop_duplicates("i")
     m=hit.set_index("i")["_cls"]
     inv.loc[m.index]=np.where(m.str.contains("PUD"),"Base Case","Emerging Inventory")
-e["Inventory Type"]=inv.values
+# the combined export names its own inventory class per row — trust it there;
+# the polygon classification only fills in for old-format basins
+fromfile = e["_inv_file"].notna() & (e["_inv_file"].astype(str)!="nan")
+e["Inventory Type"] = np.where(fromfile, e["_inv_file"].astype(str), inv.values)
 print("inventory:", e.groupby("_play")["Inventory Type"].value_counts().to_dict())
-e=e.drop(columns=["_mid"])
+e=e.drop(columns=["_mid","_inv_file"])
 
 bm = json.loads((ROOT/"app/assets/basemap.json").read_text())
 bm["windows"] = windows_out
@@ -158,6 +198,36 @@ for col in e.columns:
 blob = base64.b64encode(gzip.compress(np.concatenate(chunks).tobytes(),6)).decode()
 print(f"metrics kept {len(metrics)}")
 
+# ── alternate price decks: same wells, same metric list, one quantized blob
+#    per deck. Columns a deck's rows don't carry (deck-independent geology,
+#    completion, etc.) fall back to the primary deck's values. ──
+altdecks = {}
+for dkname, frames in ALT_FRAMES.items():
+    a = pd.concat(frames, ignore_index=True)
+    a["_k"] = a["Unique ID"].astype(str).str.strip()
+    a = a.drop_duplicates("_k").set_index("_k")
+    order = e["_k"]
+    present = order.isin(a.index).to_numpy()   # wells this deck actually re-scored
+    aq = []; ameta = {}
+    for col in metrics:
+        prim = pd.to_numeric(e[col], errors="coerce").to_numpy(dtype=np.float64)
+        if col in a.columns:
+            v = pd.to_numeric(a[col], errors="coerce").reindex(order).to_numpy(dtype=np.float64)
+            v[~present] = prim[~present]       # basins without this deck keep primary econ
+        else:
+            v = prim                            # deck-independent column
+        fin = v[np.isfinite(v)]
+        lo = float(fin.min()) if fin.size else 0.0
+        hi = float(fin.max()) if fin.size else 0.0
+        scale = (hi-lo)/65534.0 or 1.0
+        q = np.full(v.shape, 65535, dtype=np.uint16)
+        m = np.isfinite(v)
+        q[m] = np.clip(np.round((v[m]-lo)/scale), 0, 65534).astype(np.uint16)
+        ameta[col] = [lo, scale]; aq.append(q)
+    altdecks[dkname] = {"qmeta": ameta,
+        "qblob": base64.b64encode(gzip.compress(np.concatenate(aq).tobytes(),6)).decode()}
+    print(f"alt price deck {dkname}: {len(a):,} rows baked over {len(metrics)} metrics")
+
 def cat(series):
     vals = series.astype(str).str.strip().fillna("")
     levels = sorted(vals.unique())
@@ -175,9 +245,11 @@ def ordcat(series, order):
 TIERS=["Tier-1","Tier-2","Tier-3","Tier-4","Unknown"]
 
 import datetime
+primary_label = str(e["Price Deck"].iloc[0]).strip() if "Price Deck" in e else "?"
 data = {
   "play":"Appalachia","generated":datetime.date.today().isoformat(),
-  "priceDeck":str(e["Price Deck"].iloc[0]) if "Price Deck" in e else "?",
+  "priceDeck":primary_label,
+  "decks":[primary_label]+[d0 for d0 in DECKS_SEEN if d0!=primary_label],
   "n":len(e), "id": e["_k"].tolist(),
   "geo": [[round(a,5) for a in row] for row in e[["hx","hy","tx","ty"]].to_numpy()],
   "cats": {
@@ -193,5 +265,6 @@ data = {
                   + ([["Other",groups["Other"]]] if "Other" in groups else []),
   "metrics": metrics, "qmeta": qmeta, "qblob": blob,
 }
+if altdecks: data["altdecks"]=altdecks
 (OUT/"welldata.json").write_text(json.dumps(data, separators=(",",":")))
 print(f"welldata.json {(OUT/'welldata.json').stat().st_size/1e6:.1f} MB")

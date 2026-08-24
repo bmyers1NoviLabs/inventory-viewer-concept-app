@@ -43,9 +43,32 @@ METRICS = (
 )
 USE = CATS_USE + METRICS
 
+CFGD = json.loads((ROOT/"deploy_config.json").read_text())
+PRIMARY_DECK = str(CFGD.get("price_deck") or "")
+DRILLED_ALT = {}     # deck -> [prepped PDP frames] for non-primary decks
+
 def load(path, run_play):
     e = pd.read_csv(path, low_memory=False,
                     usecols=lambda c: c in USE)
+    return prep(e, run_play)
+
+def load_combined(path, run_play):
+    """PDP rows of the one-file export; primary deck feeds the app, the other
+       decks are stashed for the alternate drilled blobs"""
+    e = pd.read_csv(path, low_memory=False,
+                    usecols=lambda c: c in USE or c in ("Inventory Type","Price Deck"))
+    e = e[e["Inventory Type"].astype(str).str.strip()=="PDP"].copy()
+    dk = e["Price Deck"].astype(str).str.strip() if "Price Deck" in e else pd.Series("?",index=e.index)
+    decks = sorted(dk.unique())
+    primary = PRIMARY_DECK if PRIMARY_DECK in decks else decks[0]
+    for x in decks:
+        if x != primary:
+            DRILLED_ALT.setdefault(x, []).append(prep(e[dk==x].copy(), run_play))
+    e = e[dk==primary].copy()
+    print(f"{run_play}: combined export — {len(e):,} PDP rows (deck {primary} of {decks})")
+    return prep(e.drop(columns=[c for c in ("Inventory Type","Price Deck") if c in e]), run_play)
+
+def prep(e, run_play):
     e["_k"] = e["Unique ID"].astype(str).str.strip()
     fu = e["Formation"].astype(str).str.strip().str.upper()
     e["_form"] = [MARC_F.get(f) or UTICA_F.get(f) or
@@ -58,6 +81,12 @@ def load(path, run_play):
 
 parts=[]
 for b in BASINS:
+    # combined one-file export first (extracted by build_welldata), else old drilled zip
+    call=DATA/f"econ/all_{b.lower()}"
+    hits=sorted(glob.glob(str(call/"**"/"economics_all.csv"), recursive=True)) if call.exists() else []
+    if hits:
+        parts.append(load_combined(hits[0], b))
+        continue
     econ=DATA/f"econ/drilled_{b.lower()}"
     if not econ.exists():
         z=DATA/f"econ/drilled_{b}.zip"; alt=DATA/f"econ/drilled_{b.lower()}.zip"
@@ -116,6 +145,31 @@ D["drilled"] = {
   "lat": [int(round(x)) for x in lat],
   "metrics": metrics, "qmeta": qmeta, "qblob": blob,
 }
+# alternate price decks for the drilled block — same metric list and well
+# order; wells a deck didn't re-score keep the primary deck's values
+for _dk, _frames in DRILLED_ALT.items():
+    _a = pd.concat(_frames, ignore_index=True).drop_duplicates("_k").set_index("_k")
+    _present = d["_k"].isin(_a.index).to_numpy()
+    _aq=[]; _ameta={}
+    for c in metrics:
+        _prim = pd.to_numeric(d[c], errors="coerce").to_numpy(dtype=np.float64)
+        if c in _a.columns:
+            _v = pd.to_numeric(_a[c], errors="coerce").reindex(d["_k"]).to_numpy(dtype=np.float64)
+            _v[~_present] = _prim[~_present]
+        else:
+            _v = _prim
+        _fin=_v[np.isfinite(_v)]
+        _lo=float(_fin.min()) if _fin.size else 0.0
+        _hi=float(_fin.max()) if _fin.size else 0.0
+        _scale=(_hi-_lo)/65534.0 or 1.0
+        _q=np.full(_v.shape,65535,dtype=np.uint16)
+        _m=np.isfinite(_v)
+        _q[_m]=np.clip(np.round((_v[_m]-_lo)/_scale),0,65534).astype(np.uint16)
+        _ameta[c]=[_lo,_scale]; _aq.append(_q)
+    D["drilled"].setdefault("altdecks",{})[_dk]={"qmeta":_ameta,
+        "qblob":base64.b64encode(gzip.compress(np.concatenate(_aq).tobytes(),6)).decode()}
+    print(f"drilled alt deck {_dk}: {len(_a):,} PDP rows baked")
+
 open(OUT/"drilled_api_order.txt","w").write("\n".join(d["_k"]))  # wedge matrix row order
 
 # ── phase windows: same shapefiles + rename + methodology as build_welldata,

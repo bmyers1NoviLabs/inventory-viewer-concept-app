@@ -150,6 +150,15 @@
                    padding:0 6px; font-variant-numeric:tabular-nums; }
   .fhead2 .chev { margin-left:auto; color:var(--muted); font-size:11px; transition:transform .12s; }
   .fblock.open .chev { transform:rotate(180deg); }
+  /* high-level scenario box above the filter drawer */
+  #hlbox { margin:10px 0 14px; padding:9px 12px 11px; border:1px solid var(--border);
+    border-radius:10px; background:var(--accent-soft); }
+  #hlbox .hlt { font-size:10px; font-weight:700; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--muted); }
+  #hlbox .hlrow { display:flex; align-items:center; gap:8px; margin-top:7px; }
+  #hlbox label { font-size:11.5px; color:var(--ink2); flex:0 0 62px; }
+  #hlbox select { flex:1; min-width:0; font-size:12px; padding:4px 6px; border-radius:7px;
+    border:1px solid var(--border); background:var(--surface); color:var(--ink); cursor:pointer; }
   .fbody { display:none; padding:0 2px 10px; }
   .fblock.open .fbody { display:block; }
   .fsearch { width:100%; font:inherit; font-size:12px; color:var(--ink); background:var(--page);
@@ -435,6 +444,11 @@
         </div>
       </div>
     </div>
+    <div id="hlbox">
+      <div class="hlt">Scenario</div>
+      <div class="hlrow"><label for="hl-deck">Price deck</label><select id="hl-deck"></select></div>
+      <div class="hlrow"><label for="hl-density">Density</label><select id="hl-density"></select></div>
+    </div>
     <div id="fblocks"></div>
     <div id="numblocks"></div>
     <button id="addnum">+ Add numeric filter</button>
@@ -588,6 +602,8 @@
       <button data-qm="model" aria-pressed="false">Model inputs</button>
     </div>
     <div class="seg" role="group" aria-label="Group by" id="qegroupseg"></div>
+    <button class="link" id="qe-reset" title="Discard your edits for this grouping and refill every cell from the drilling-pace presets"
+      style="font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer">↺ Reset to presets</button>
     <span id="qehint" style="font-size:10.5px;color:var(--muted)">wells to drill per period · prefilled from actual drilling pace — last full half-year, annualized</span>
     <span style="flex:1"></span>
     <button class="link" id="qe-run" style="font-size:12px;font-weight:600;color:#fff;background:var(--accent);border:none;border-radius:14px;padding:5px 16px;cursor:pointer">Run Model</button>
@@ -1667,11 +1683,65 @@ function fullSel(cat){
 /* pad filtering uses the filters pads actually carry; Formation and
    Phase window are well-level and do not apply in pad mode */
 const PADFCATS=["Play","County","State","Operator","Subbasin"];
+
+/* ── high-level scenario: price deck + density (the box above the drawer) ── */
+let DENSITY=null, CURDECK=null, PRIMARYQ=null;
+function updateSubtitle(){
+  document.getElementById("subtitle").textContent =
+    "Utica + Marcellus · " + D.n.toLocaleString() + " undrilled · " +
+    (D.drilled?D.drilled.n.toLocaleString()+" drilled · ":"") +
+    D.pads.n.toLocaleString() + " pads · deck " + (CURDECK||D.priceDeck) + " · " + D.generated;
+}
+async function setDeck(name){
+  if(name===CURDECK) return;
+  if(!PRIMARYQ) PRIMARYQ={buf:QBUF,qmeta:D.qmeta,dbuf:QBUF3,dqmeta:D.drilled?D.drilled.qmeta:null};
+  if(name===D.priceDeck){
+    QBUF=PRIMARYQ.buf; D.qmeta=PRIMARYQ.qmeta;
+    if(D.drilled&&PRIMARYQ.dbuf){ QBUF3=PRIMARYQ.dbuf; D.drilled.qmeta=PRIMARYQ.dqmeta; }
+  } else {
+    const a=D.altdecks&&D.altdecks[name];
+    if(!a) return;
+    if(!a.buf){ a.buf=new Uint8Array(await gunzip(a.qblob)); a.qblob=null; }
+    QBUF=a.buf; D.qmeta=a.qmeta;
+    const ad=D.drilled&&D.drilled.altdecks&&D.drilled.altdecks[name];
+    if(ad){
+      if(!ad.buf){ ad.buf=new Uint8Array(await gunzip(ad.qblob)); ad.qblob=null; }
+      QBUF3=ad.buf; D.drilled.qmeta=ad.qmeta;
+    }
+  }
+  CURDECK=name;
+  const dsel=document.getElementById("hl-deck");
+  if(dsel&&dsel.value!==name) dsel.value=name;
+  for(const k in VCACHE) delete VCACHE[k];
+  for(const k in DVCACHE) delete DVCACHE[k];
+  rebuildNumBlocks();          /* numeric filter ranges re-derive from the new deck */
+  updateSubtitle();
+  applyFilters();
+}
+function initScenario(){
+  const ds=document.getElementById("hl-deck"), dn=document.getElementById("hl-density");
+  const decks=(D.decks&&D.decks.length?D.decks:[D.priceDeck]).filter(Boolean);
+  CURDECK=CURDECK||decks[0];
+  ds.innerHTML=decks.map(k=>`<option${k===CURDECK?" selected":""}>${esc(k)}</option>`).join("");
+  ds.disabled=decks.length<2;
+  ds.title=decks.length<2?"This build carries one price deck":"Switch every metric, filter and chart to this price deck's economics";
+  const dens=D.cats.Inventory?D.cats.Inventory.levels.filter(l=>l!=="PDP"):[];
+  if(DENSITY===null&&dens.includes("Base Case")) DENSITY="Base Case";
+  dn.innerHTML=dens.map(l=>`<option${l===DENSITY?" selected":""}>${esc(l)}</option>`).join("")
+    +`<option value="__all__"${DENSITY?"":" selected"}>All scenarios</option>`;
+  dn.title="Which undrilled density scenario is in play — PDP wells are unaffected";
+  ds.onchange=()=>setDeck(ds.value);
+  dn.onchange=()=>{ DENSITY=dn.value==="__all__"?null:dn.value; applyFilters(); };
+}
 function applyFilters(){
   nSel=0;
+  /* density scenario gates the undrilled universe before any drawer filter */
+  const invC=D.cats.Inventory;
+  const dIx=(DENSITY&&invC)?invC.levels.indexOf(DENSITY):-1;
   const numArr=NUMF.map(f=>({v:V(f.metric),lo:f.lo,hi:f.hi,keepNaN:f.keepNaN!==false,
     all:f.lo<=f.min&&f.hi>=f.max}));
   for(let i=0;i<D.n;i++){
+    if(dIx>=0&&invC.ix[i]!==dIx){ SEL[i]=0; continue; }
     let ok=1;
     for(const c of FCATS){
       const s=fsel[c];
@@ -2182,27 +2252,55 @@ function hoverMap(e){
 function seriesStyle(i){
   return {color:JITTER_COLORS[i%JITTER_COLORS.length], dash:null};
 }
+/* drilled (PDP) wells join the screening charts only when the user has
+   explicitly ticked PDP under the Inventory Type filter */
+function pdpInCharts(){
+  if(!D.drilled) return false;
+  const s=fsel.Inventory;
+  if(!s||fullSel("Inventory")) return false;
+  const pix=D.cats.Inventory.levels.indexOf("PDP");
+  return pix>=0&&s.has(pix);
+}
 function splitSets(metric,split,withLat){
   const v=V(metric), lat=withLat?V("Lateral Length"):null;
   split=split?LBL2CAT[split]||split:split;
+  const inc=pdpInCharts()&&drilledMetricOk(metric)&&(!split||!!D.drilled.cats[split])
+            &&(!withLat||drilledMetricOk("Lateral Length"));
+  const dv=inc?DV(metric):null, dlat=(inc&&withLat)?DV("Lateral Length"):null;
+  const dc=(inc&&split)?D.drilled.cats[split]:null;
   let groups=[["All",null]];
   if(split){
-    /* top 5 by well count under the current filter — not alphabetical */
+    /* top 5 by well count under the current filter — not alphabetical;
+       counted by level NAME so PDP + undrilled share buckets */
     const cat=D.cats[split];
-    const cnt=new Array(cat.levels.length).fill(0);
-    for(let i=0;i<D.n;i++) if(SEL[i]) cnt[cat.ix[i]]++;
-    groups=[...cnt.keys()].filter(ix=>cnt[ix]>0)
-      .sort((a,b)=>cnt[b]-cnt[a]).slice(0,5)
-      .map(ix=>[cat.levels[ix],ix]);
+    const cnt=new Map();
+    for(let i=0;i<D.n;i++) if(SEL[i]){
+      const L=cat.levels[cat.ix[i]]; cnt.set(L,(cnt.get(L)||0)+1);
+    }
+    if(inc) for(let i=0;i<D.drilled.n;i++) if(SELD[i]){
+      const L=dc.levels[dc.ix[i]]; cnt.set(L,(cnt.get(L)||0)+1);
+    }
+    groups=[...cnt.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([L])=>[L,L]);
   }
-  return groups.map(([L,ix])=>{
+  return groups.map(([L,name])=>{
     const a=[], wts=withLat?[]:null;
+    const uix=name!=null?D.cats[split].levels.indexOf(name):-1;
     for(let i=0;i<D.n;i++){
       if(!SEL[i]) continue;
-      if(ix!=null&&D.cats[split].ix[i]!==ix) continue;
+      if(name!=null&&D.cats[split].ix[i]!==uix) continue;
       const x=v[i]; if(!isFinite(x)) continue;
       a.push(x);
       if(withLat) wts.push(isFinite(lat[i])?lat[i]:0);
+    }
+    if(inc){
+      const dix=name!=null?dc.levels.indexOf(name):-1;
+      for(let i=0;i<D.drilled.n;i++){
+        if(!SELD[i]) continue;
+        if(name!=null&&dc.ix[i]!==dix) continue;
+        const x=dv[i]; if(!isFinite(x)) continue;
+        a.push(x);
+        if(withLat) wts.push(isFinite(dlat[i])?dlat[i]:0);
+      }
     }
     return {label:L,vals:a,wts};
   }).filter(s=>s.vals.length>1).slice(0,5);
@@ -2389,15 +2487,27 @@ const ch2=document.getElementById("chart2"), c2x=ch2.getContext("2d");
 let c2Geom=null, c2Type="avg";
 const LOWER_BETTER=/Breakeven|Cost|Pay Out|Payout|Shrink|TVD|Uncertainty|Differential/;
 function groupValues(metric,group){
-  const v=V(metric), cat=D.cats[LBL2CAT[group]||group], out=new Map();
+  const key=LBL2CAT[group]||group;
+  const v=V(metric), cat=D.cats[key], out=new Map();   /* keyed by level NAME */
   for(let i=0;i<D.n;i++){
     if(!SEL[i]) continue; const x=v[i];
     if(!isFinite(x)) continue;
-    const k=cat.ix[i];
-    if(!out.has(k)) out.set(k,[]);
-    out.get(k).push(x);
+    const L=cat.levels[cat.ix[i]];
+    if(!out.has(L)) out.set(L,[]);
+    out.get(L).push(x);
   }
-  return [...out.entries()].map(([k,vals])=>({label:cat.levels[k],vals}));
+  /* PDP wells fold into the same named buckets when explicitly included */
+  if(pdpInCharts()&&drilledMetricOk(metric)&&D.drilled.cats[key]){
+    const dv=DV(metric), dc=D.drilled.cats[key];
+    for(let i=0;i<D.drilled.n;i++){
+      if(!SELD[i]) continue; const x=dv[i];
+      if(!isFinite(x)) continue;
+      const L=dc.levels[dc.ix[i]];
+      if(!out.has(L)) out.set(L,[]);
+      out.get(L).push(x);
+    }
+  }
+  return [...out.entries()].map(([label,vals])=>({label,vals}));
 }
 /* split a long multi-word label onto two lines instead of chopping it:
    2+ words and over `maxc` chars → break at the space nearest the middle;
@@ -2566,18 +2676,30 @@ function drawChart2(){
        mean of X and Y, palette colours, black outline, labelled points,
        bold axis titles, zero reference lines when zero is in range */
     const group=document.getElementById("c2-group").value;
+    const gkx=LBL2CAT[group]||group;
     const mx2=MV["c2-metric2"], vy=v, vx=V(mx2);
-    const cat=D.cats[LBL2CAT[group]||group];
-    const agg=new Map();
+    const cat=D.cats[gkx];
+    const agg=new Map();      /* keyed by level NAME so PDP folds into the same points */
     for(let i=0;i<D.n;i++){
       if(!SEL[i]) continue;
       const a=vx[i], b=vy[i];
       if(!isFinite(a)||!isFinite(b)) continue;
-      const k=cat.ix[i];
-      let o=agg.get(k); if(!o){ o={sx:0,sy:0,n:0}; agg.set(k,o); }
+      const L=cat.levels[cat.ix[i]];
+      let o=agg.get(L); if(!o){ o={sx:0,sy:0,n:0}; agg.set(L,o); }
       o.sx+=a; o.sy+=b; o.n++;
     }
-    let pts=[...agg.entries()].map(([k,o])=>({label:cat.levels[k],x:o.sx/o.n,y:o.sy/o.n,n:o.n}));
+    if(pdpInCharts()&&drilledMetricOk(metric)&&drilledMetricOk(mx2)&&D.drilled.cats[gkx]){
+      const dvy=DV(metric), dvx=DV(mx2), dcx=D.drilled.cats[gkx];
+      for(let i=0;i<D.drilled.n;i++){
+        if(!SELD[i]) continue;
+        const a=dvx[i], b=dvy[i];
+        if(!isFinite(a)||!isFinite(b)) continue;
+        const L=dcx.levels[dcx.ix[i]];
+        let o=agg.get(L); if(!o){ o={sx:0,sy:0,n:0}; agg.set(L,o); }
+        o.sx+=a; o.sy+=b; o.n++;
+      }
+    }
+    let pts=[...agg.entries()].map(([L,o])=>({label:L,x:o.sx/o.n,y:o.sy/o.n,n:o.n}));
     pts.sort((a,b)=>b.n-a.n);
     const MAXP=20;
     const cut=pts.length>MAXP;
@@ -2640,27 +2762,31 @@ function drawChart2(){
        below each tranche", stacked by the group select, palette colours,
        horizontal legend on top, black axes, bold titles */
     const group=document.getElementById("c2-group").value;
-    const gcat=D.cats[LBL2CAT[group]||group];
-    const a=[];
-    for(let i=0;i<D.n;i++) if(SEL[i]&&isFinite(v[i])) a.push(v[i]);
+    const gk2=LBL2CAT[group]||group, gcat=D.cats[gk2];
+    /* value + level-name pairs spanning undrilled (+ PDP when included) */
+    const pv=[], pl=[];
+    for(let i=0;i<D.n;i++) if(SEL[i]&&isFinite(v[i])){ pv.push(v[i]); pl.push(gcat.levels[gcat.ix[i]]); }
+    if(pdpInCharts()&&drilledMetricOk(metric)&&D.drilled.cats[gk2]){
+      const dv2=DV(metric), dc2=D.drilled.cats[gk2];
+      for(let i=0;i<D.drilled.n;i++) if(SELD[i]&&isFinite(dv2[i])){ pv.push(dv2[i]); pl.push(dc2.levels[dc2.ix[i]]); }
+    }
+    const a=pv.slice().sort((x,y)=>x-y);
     if(!a.length){c2Geom=null;return;}
-    a.sort((x,y)=>x-y);
     const lo=a[Math.floor(a.length*.01)], hi=a[Math.min(a.length-1,Math.floor(a.length*.99))];
     const edges=Array.from({length:6},(_,i)=>lo+(hi-lo)*(i+1)/6);
     /* top 6 stack levels by filtered count + Other */
-    const cnt=new Array(gcat.levels.length).fill(0);
-    for(let i=0;i<D.n;i++) if(SEL[i]&&isFinite(v[i])) cnt[gcat.ix[i]]++;
-    const order=[...cnt.keys()].filter(ix=>cnt[ix]>0).sort((x,y)=>cnt[y]-cnt[x]);
-    const keep=order.slice(0,6), pos=new Map(keep.map((k,j)=>[k,j]));
+    const cnt=new Map();
+    for(const L of pl) cnt.set(L,(cnt.get(L)||0)+1);
+    const order=[...cnt.entries()].sort((x,y)=>y[1]-x[1]).map(([L])=>L);
+    const keep=order.slice(0,6), pos=new Map(keep.map((L,j)=>[L,j]));
     const hasOther=order.length>6;
-    const stacks=keep.map(k=>gcat.levels[k]).concat(hasOther?["Other"]:[]);
+    const stacks=keep.concat(hasOther?["Other"]:[]);
     const S=stacks.length;
     const rows=edges.map(cap=>({label:"≤ "+fmt(cap),cap,segs:new Array(S).fill(0),n:0}));
-    for(let i=0;i<D.n;i++){
-      if(!SEL[i]||!isFinite(v[i])) continue;
-      const si=pos.has(gcat.ix[i])?pos.get(gcat.ix[i]):(hasOther?S-1:-1);
+    for(let j=0;j<pv.length;j++){
+      const si=pos.has(pl[j])?pos.get(pl[j]):(hasOther?S-1:-1);
       if(si<0) continue;
-      for(const r of rows) if(v[i]<=r.cap){ r.segs[si]++; r.n++; }
+      for(const r of rows) if(pv[j]<=r.cap){ r.segs[si]++; r.n++; }
     }
     const legendH=(Math.ceil(S/3)*15+8)*d;
     const ML=54*d,MR=16*d,MT=10*d+legendH,MB=54*d;
@@ -2721,6 +2847,17 @@ function drawChart2(){
       let qi = x<=th[0]?0 : x<=th[1]?1 : x<=th[2]?2 : 3;
       if(!lower) qi=3-qi;
       counts[qi]++;
+    }
+    /* PDP wells classify against the same undrilled quartile boundaries */
+    if(pdpInCharts()&&drilledMetricOk(metric)){
+      const dv2=DV(metric);
+      for(let i=0;i<D.drilled.n;i++){
+        if(!SELD[i]) continue; const x=dv2[i];
+        if(!isFinite(x)) continue;
+        let qi = x<=th[0]?0 : x<=th[1]?1 : x<=th[2]?2 : 3;
+        if(!lower) qi=3-qi;
+        counts[qi]++;
+      }
     }
     const rows=counts.map((n,i)=>({label:"Q"+(i+1),n}));
     const cols=[css("--t1"),css("--t2"),css("--t3"),css("--t4")];
@@ -4077,6 +4214,7 @@ document.querySelectorAll("#qemodeseg button").forEach(b=>b.addEventListener("cl
   document.getElementById("qegroups").style.display=model?"none":"";
   document.getElementById("qeinputs").style.display=model?"":"none";
   document.getElementById("qegroupseg").style.display=model?"none":"";
+  document.getElementById("qe-reset").style.display=model?"none":"";
   document.getElementById("qehint").textContent=model
     ?"edit the blue cells, then Run Model — $/bbl and $/Mcf throughout; PDP + scheduled undrilled valued separately"
     :"wells to drill per period · prefilled from actual drilling pace — last full half-year, annualized";
@@ -4169,6 +4307,13 @@ function qeReport(){
     ]});
 }
 document.getElementById("qe-report").addEventListener("click",qeReport);
+
+/* reset the ACTIVE grouping's schedule back to its presets — renderQE
+   re-derives the defaults (drilling pace, or the last-year fallback) */
+document.getElementById("qe-reset").addEventListener("click",()=>{
+  delete QESCHED[qeGroupBy];
+  renderQE();
+});
 
 document.getElementById("qe-export").addEventListener("click",()=>{
   const sched=QESCHED[qeGroupBy]||{};
@@ -4819,10 +4964,8 @@ window.addEventListener("resize",()=>{ clearTimeout(rsz); rsz=setTimeout(redrawA
   if(D.drilled) SELD=new Uint8Array(D.drilled.n).fill(1);
   buildFPY(); extendInventory(); buildIRRTier(); renameQuartiles();
   computeBounds();
-  document.getElementById("subtitle").textContent =
-    "Utica + Marcellus · " + D.n.toLocaleString() + " undrilled · " +
-    (D.drilled?D.drilled.n.toLocaleString()+" drilled · ":"") +
-    D.pads.n.toLocaleString() + " pads · deck " + D.priceDeck + " · " + D.generated;
+  initScenario();
+  updateSubtitle();
   MV.padcolor="Total NPV10";
   let stashWellColor="Total NPV10";
   makeCombo("colorby","Total NPV10",()=>{

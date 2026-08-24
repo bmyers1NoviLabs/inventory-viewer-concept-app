@@ -35,6 +35,11 @@
       "s3": "s3://novi-master-undrilled-bulk-data/Undrilled_{basin}_ML_Features.csv"
     },
     {
+      "local": "data/econ/all_{basin}.zip",
+      "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/{basin}_all*}",
+      "optional": true
+    },
+    {
       "local": "data/econ/undrilled_{basin}.zip",
       "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/{basin}_undrilled*}"
     },

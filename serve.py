@@ -193,6 +193,7 @@ def sync_s3(refresh=False):
 # reruns the build chain, and swaps the HTML — no stale pilot data survives.
 APP_STAMP = ROOT / "_app_build.json"
 APP_BUILD_LOCALS = [
+    "data/econ/all_{basin}.zip",       # combined one-file export (optional per basin)
     "data/econ/undrilled_{basin}.zip",
     "data/econ/drilled_{basin}.zip",
     "data/Undrilled_{basin}_WellboreLocations.csv",
@@ -205,6 +206,7 @@ def rebuild_app(s3, cfg, force=False):
     global DASH
     basins = cfg.get("basins", [""])
     by_local = {src["local"]: src["s3"] for src in cfg.get("sources", [])}
+    optional = {src["local"] for src in cfg.get("sources", []) if src.get("optional")}
     plan, stamps = [], {}
     for tpl in APP_BUILD_LOCALS:
         uri = by_local.get(tpl)
@@ -218,6 +220,9 @@ def rebuild_app(s3, cfg, force=False):
                 stamps[str(local.relative_to(ROOT))] = _stamp(s3, bucket, key)
                 plan.append((local, bucket, key))
             except Exception as e:
+                if tpl in optional:
+                    print(f"  app rebuild: optional source {tpl} not on S3 for {basin!r} — building without it")
+                    continue
                 print(f"  app rebuild: cannot resolve {tpl} for {basin!r} ({e}) — skipping the rebuild")
                 return
     if not force and APP_STAMP.exists():
