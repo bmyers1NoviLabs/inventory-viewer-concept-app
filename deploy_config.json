@@ -1,6 +1,9 @@
 {
   "region": "us-east-2",
-  "basins": ["Utica", "Marcellus"],
+  "basins": [
+    "Utica",
+    "Marcellus"
+  ],
   "drilled_scope": "Appalachia",
   "sources": [
     {
@@ -33,11 +36,15 @@
     },
     {
       "local": "data/econ/undrilled_{basin}.zip",
-      "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/undrilled_{basin}*}"
+      "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/{basin}_undrilled*}"
     },
     {
       "local": "data/econ/drilled_{basin}.zip",
-      "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/drilled_{basin}*}"
+      "s3": "s3://novi-master-inventory-economics/{match:master-curated-intelligence-economics/{basin}_drilled*}"
     }
+  ],
+  "wedge_source": "s3://novi-bulk-api-data/bulk-api-data-raw/us-onshore/Appalachia/All subbasins/Bulk/Database/NGL_ForecastWellMonths.tsv",
+  "tcurve_sources": [
+    "s3://novi-master-undrilled-bulk-data/Undrilled_{basin}_ForecastWellMonths.csv"
   ]
 }

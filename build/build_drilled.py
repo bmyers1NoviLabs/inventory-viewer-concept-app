@@ -76,7 +76,7 @@ fixed = d["_k"].map(opmap)
 n_fix = int((fixed.notna() & (fixed != d["Operator"].astype(str))).sum())
 d["Operator"] = fixed.fillna(d["Operator"])
 print(f"operator corrected from WellDetails on {n_fix:,} of {len(d):,} drilled wells")
-print(f"utica run {len(u):,} + marc run {len(m):,} -> unique drilled {len(d):,}")
+print(f"{' + '.join(f'{b} run {len(x):,}' for b, x in zip(BASINS, parts))} -> unique drilled {len(d):,}")
 print("play:", d["_play"].value_counts().to_dict())
 print("formations:", d["_form"].value_counts().head(8).to_dict())
 

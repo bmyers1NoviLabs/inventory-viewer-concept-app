@@ -91,7 +91,8 @@ for z in sorted((STATIC/"pud_res").glob("*.zip")):
         gdf=gpd.read_file(shp).to_crs(4326)
         cols={c.lower():c for c in gdf.columns}
         fc=cols.get("forma") or cols.get("formation")
-        wc=cols.get("wellclass") or cols.get("pud_res") or cols.get("class")
+        wc=(cols.get("wellclass") or cols.get("pud/res") or cols.get("pud_res")
+              or cols.get("pudres") or cols.get("class"))
         if fc is None or wc is None:
             print(f"  ! {shp}: no FORMA/WellClass columns ({list(gdf.columns)[:8]}) — skipped"); continue
         gdf["_form"]=gdf[fc].astype(str).str.strip().str.upper().map(FORMA).fillna(gdf[fc].astype(str))

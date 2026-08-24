@@ -8,3 +8,10 @@ config.json
 projects.json
 exports/
 __pycache__/
+
+# session scratch / generated artifacts
+_utica_econ_slim.csv
+novi-dash-build-bundle.zip
+_app_build.json
+build.log
+*.part

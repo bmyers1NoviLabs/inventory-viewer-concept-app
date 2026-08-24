@@ -73,6 +73,34 @@ __POPPINS__
   .topbar .tabs button:focus-visible { outline:2px solid #00a3bf; outline-offset:-2px; }
   #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
              background:var(--page); z-index:50; color:var(--muted); font-size:14px; }
+  /* startup gate: the session always begins on the full unfiltered dataset,
+     then the user opens a saved project or starts a new one */
+  #startgate { position:fixed; inset:0; z-index:55; display:none; background:var(--page);
+               align-items:center; justify-content:center; padding:24px; }
+  #startgate.open { display:flex; }
+  #startgate .sg { width:min(560px,100%); background:var(--surface); border:1px solid var(--border);
+                   border-radius:14px; box-shadow:var(--shadow); padding:22px 24px 18px;
+                   max-height:100%; overflow:auto; }
+  #startgate .sg-logo { height:26px; margin-bottom:12px; }
+  #startgate h1 { font-size:19px; font-weight:600; margin:0 0 3px; color:var(--ink); letter-spacing:-.01em; }
+  #startgate .sub { font-size:11.5px; color:var(--muted); margin-bottom:18px; }
+  #startgate .lab { font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+                    color:var(--muted); margin:16px 0 7px; }
+  #startgate .newrow { display:flex; gap:8px; }
+  #startgate .newrow input { flex:1; font:inherit; font-size:13px; color:var(--ink);
+      background:var(--page); border:1px solid var(--border); border-radius:8px; padding:8px 11px; }
+  #startgate .newrow input:focus { outline:none; border-color:var(--accent); }
+  #startgate .newrow button { font:inherit; font-size:13px; font-weight:600; color:#fff;
+      background:var(--accent); border:none; border-radius:8px; padding:8px 18px; cursor:pointer; white-space:nowrap; }
+  #startgate .sglist { display:flex; flex-direction:column; gap:5px; max-height:250px; overflow:auto; }
+  #startgate .sgitem { display:flex; align-items:center; gap:9px; font-size:13px; color:var(--ink2);
+      border:1px solid var(--border); border-radius:8px; padding:9px 11px; cursor:pointer; background:var(--page); }
+  #startgate .sgitem:hover { border-color:var(--accent); color:var(--ink); background:var(--accent-soft); }
+  #startgate .sgitem .dt { margin-left:auto; font-size:10.5px; color:var(--muted); }
+  #startgate .sgitem .rm { border:none; background:none; color:var(--muted); cursor:pointer;
+      font-size:13px; padding:0 2px; line-height:1; }
+  #startgate .sgitem .rm:hover { color:#bf200f; }
+  #startgate .none { font-size:12px; color:var(--muted); padding:10px 2px; }
 
   main { flex:1; display:grid; grid-template-columns:224px 1fr 6px 420px; gap:10px; padding:12px; min-height:0; }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:10px;
@@ -229,6 +257,9 @@ __POPPINS__
 
   #mapwrap { position:relative; flex:1; min-height:0; }
   canvas { display:block; width:100%; height:100%; }
+  .fblock.num .nnan { display:flex; align-items:center; gap:6px; margin-top:7px;
+    font-size:10.5px; color:var(--muted); cursor:pointer; user-select:none; }
+  .fblock.num .nnan input { accent-color:var(--accent); margin:0; }
   #maplegend { position:absolute; left:12px; bottom:12px; background:var(--surface);
     border:1px solid var(--border); border-radius:8px; padding:8px 10px;
     font-size:11px; color:var(--ink2); box-shadow:var(--shadow); max-width:230px; }
@@ -366,6 +397,20 @@ __POPPINS__
   <button id="themebtn" title="Toggle light / dark">Theme</button>
 </div>
 <div id="loading">Unpacking well data…</div>
+<div id="startgate" role="dialog" aria-modal="true" aria-label="Open a project">
+  <div class="sg">
+    <img class="sg-logo" id="sg-logo" alt="Novi Labs">
+    <h1>Appalachia Inventory</h1>
+    <div class="sub" id="sg-sub"></div>
+    <div class="lab">Start a new project</div>
+    <div class="newrow">
+      <input id="sg-name" type="text" maxlength="40" placeholder="Project name (optional)">
+      <button id="sg-new">Open full data set</button>
+    </div>
+    <div class="lab">Or open a saved project</div>
+    <div class="sglist" id="sg-list"></div>
+  </div>
+</div>
 
 <main>
   <section class="card" id="sidebar" aria-label="Filters">
@@ -400,9 +445,12 @@ __POPPINS__
         <button data-mode="pads" aria-pressed="false">Pads</button>
       </div>
       <button id="mapexport" title="Save the current map view as a PNG">PNG ⬇</button>
+      <button id="mapshp" title="Export the filtered sticks and every layer that is switched on as shapefiles (zipped)">SHP ⬇</button>
       <button id="layerbtn" aria-expanded="false">Layers ▾</button>
       <label style="font-size:10.5px;letter-spacing:.07em;color:var(--muted)">COLOR BY</label>
       <div class="combo" id="colorby"></div>
+      <select id="rampsel" title="Map colour ramp — viridis is perceptually uniform, safe for colour-vision deficiency and in greyscale"
+        style="font-size:10.5px;font-family:inherit;color:var(--ink2);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 6px"></select>
       <div id="layermenu"></div>
     </div>
     <div id="mapwrap">
@@ -517,7 +565,8 @@ __POPPINS__
     <div id="tab-quickeval" class="tabpane">
       <div class="card" aria-label="Production wedge">
         <div class="card-head">
-          <span class="t" style="margin-right:auto">Production wedge — filtered wells</span>
+          <span class="t">Production wedge — filtered wells</span>
+          <select id="wedgestream" title="Stream" style="font-size:11px;font-family:inherit;color:var(--ink2);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:2px 6px;margin-right:auto"></select>
           <span id="wedgenote" style="font-size:10.5px;color:var(--muted)"></span>
         </div>
         <div class="chartbox"><canvas id="wedge"></canvas></div>
@@ -663,6 +712,84 @@ function catColorAt(i){
   const base=(CUSTOMRAMP&&CUSTOMRAMP.length)?CUSTOMRAMP:JITTER_COLORS;
   const cyc=Math.floor(i/base.length), c=base[i%base.length];
   return cyc?tint(c,Math.min(.78,cyc*.28)):c;
+}
+/* ONE colour per category level everywhere (map, overview charts, wedge, exports):
+   levels are ranked once by full-dataset well count — undrilled first, then
+   drilled and pads — so the same operator/play/county keeps its colour no
+   matter the filter, chart, or dataset */
+const CATRANK={};
+function catRankMap(ck){
+  let m=CATRANK[ck];
+  if(!m){
+    m=CATRANK[ck]=new Map();
+    const take=cat=>{
+      if(!cat) return;
+      const counts=new Array(cat.levels.length).fill(0);
+      for(let i=0;i<cat.ix.length;i++) counts[cat.ix[i]]++;
+      [...counts.keys()].sort((a,b)=>counts[b]-counts[a])
+        .forEach(ix=>{ const L=cat.levels[ix]; if(!m.has(L)) m.set(L,m.size); });
+    };
+    take(D.cats&&D.cats[ck]);
+    take(D.drilled&&D.drilled.cats&&D.drilled.cats[ck]);
+    take(D.pads&&D.pads.cats&&D.pads.cats[ck]);
+  }
+  return m;
+}
+function catColorFor(ck,levelName){
+  const r=catRankMap(ck).get(levelName);
+  return r==null?css("--nan"):catColorAt(r);
+}
+/* numeric colouring on the map: 10 equal-count bins, red = highest decile,
+   green = lowest — the Novi map product's look */
+/* Map ramps. Measured in CAM02-UCS (the space from the viridis talk):
+     viridis  lightness 19->92 monotonic, step ratio 1.1x, nothing collapses
+              under deuteranomaly, best-vs-worst bin dE 91
+     cividis  built so colour-vision-deficient and normal vision see the same
+     RdYlGn   lightness 39->92 with a turn at bin 4 — light in the MIDDLE and
+              dark at both ends, so the extremes read alike in greyscale; two
+              adjacent bins collapse to dE 0.5 under deuteranomaly and the best
+              decile sits dE 8 from the worst. Kept because red/green is the
+              house convention, but only honest when it diverges around zero. */
+const RAMPS={
+  viridis:["#440154","#482878","#3e4a89","#31688e","#26828e",
+           "#1f9e89","#35b779","#6ece58","#b5de2b","#fde725"],
+  cividis:["#00204d","#00306f","#39486b","#575d6d","#707173",
+           "#8a8779","#a69d75","#c4b56c","#e4cf5b","#ffea46"],
+  magma:  ["#000004","#180f3d","#440f76","#721f81","#9e2f7f",
+           "#cd4071","#f1605d","#fd9668","#feca8d","#fcfdbf"],
+  /* Novi teal, generated with even CAM02-UCS lightness steps off #00a3bf —
+     brand colour that still measures up (J 22->92 monotonic, 1.2x step ratio) */
+  novi:   ["#2c3133","#394447","#44585e","#4b6c76","#4c8391",
+           "#439aaf","#60aec2","#7fc3d5","#9fd8e8","#c2eefb"],
+  rdylgn: ["#006837","#1a9850","#66bd63","#a6d96a","#d9ef8b",
+           "#fee08b","#fdae61","#f46d43","#d73027","#a50026"]};
+const RAMP_LABEL={viridis:"Viridis (default)",cividis:"Cividis (CVD-safe)",
+                  magma:"Magma",novi:"Novi teal",rdylgn:"Red → Green (value)"};
+let MAPRAMP="viridis";
+const RDYLGN=RAMPS.rdylgn;    /* kept for the PNG legend path */
+/* Red→Green only carries meaning if red really is "loses money", so when the
+   metric crosses zero the two halves are ramped away from zero rather than
+   spread evenly across the deciles. */
+function binColors(edges){
+  if(CUSTOMRAMP) return Array.from({length:10},(_,b)=>rampColor((b+.5)/10));
+  const ramp=RAMPS[MAPRAMP]||RAMPS.viridis;
+  if(MAPRAMP!=="rdylgn"||!edges) return ramp;
+  const neg=[],pos=[];
+  for(let b=0;b<10;b++) ((edges[b]+edges[b+1])/2<0?neg:pos).push(b);
+  if(!neg.length||!pos.length) return ramp;      /* one-sided: plain ramp */
+  const out=new Array(10);
+  /* reds deepen as values fall below zero, greens deepen as they rise above,
+     interpolated so each side uses its full range however the bins split */
+  const REDS=["#fee08b","#fdae61","#f46d43","#d73027","#a50026"];
+  const GRNS=["#d9ef8b","#a6d96a","#66bd63","#1a9850","#006837"];
+  neg.forEach((b,i)=>{ out[b]=stopColor(REDS,(neg.length-1-i)/Math.max(1,neg.length-1)); });
+  pos.forEach((b,i)=>{ out[b]=stopColor(GRNS,i/Math.max(1,pos.length-1)); });
+  return out;
+}
+function binOf(edges,x){
+  let lo=0,hi=9;
+  while(lo<hi){ const m2=(lo+hi+1)>>1; if(x>=edges[m2]) lo=m2; else hi=m2-1; }
+  return lo;
 }
 
 /* ── custom palette drop (csv / txt / xlsx with hex colors) ── */
@@ -881,7 +1008,7 @@ async function applyPaletteFile(file){
         return;
       }
       if(tc) tc.arrayBuffer().then(b=>parseTcurvesBuf(b).then(()=>idbPut(tcKey(),
-        {q:TCURVES.q.buffer,oily:TCURVES.oily.buffer,m:TCURVES.m}))).catch(err=>{
+        {q:TCURVES.q.buffer,m:TCURVES.m}))).catch(err=>{
         document.getElementById("wedgenote").textContent="tcurves load failed: "+err.message; });
       const shps=files.filter(f=>/\.shp$/i.test(f.name)||/\.zip$/i.test(f.name));
       if(wedge) wedge.arrayBuffer().then(parseWedgeAny).catch(err=>{
@@ -1041,8 +1168,11 @@ function extendInventory(){
   const pix=inv.levels.indexOf("PDP");
   D.drilled.cats.Inventory={levels:inv.levels,ix:new Array(D.drilled.n).fill(pix)};
 }
+/* IP30 + EUR for every stream — always in the drawer */
+const STREAM_RATE=["Gas IP (Mcf/d)","Dry Gas IP (Mcf/d)","Oil IP (bbl/d)","NGL IP (bbl/d)",
+  "Gas Eur (Mcf)","Dry Gas EUR (Mcf)","Oil EUR (bbl)","NGL EUR (bbl)"];
 const DEFAULT_NUMS=["Total NPV10","Total NPV25","Three Stream EUR (boe 6:1)",
-  "Gas IP (Mcf/d)",
+  ...STREAM_RATE,
   "Gas Two Year Breakeven","Gas NPV10 Breakeven","Gas NPV25 Breakeven",
   "Oil Two Year Breakeven","Oil NPV10 Breakeven","Oil NPV25 Breakeven",
   "NGL Two Year Breakeven","NGL NPV10 Breakeven","NGL NPV25 Breakeven",
@@ -1080,7 +1210,14 @@ const HELP={};
   HELP["Total NPV10"]="Net present value of the well's cash flows at a 10% discount rate, at the price deck.";
   HELP["Total NPV25"]="Net present value at a 25% discount rate.";
   HELP["Three Stream EUR (boe 6:1)"]="Estimated ultimate recovery across oil, gas and NGL, gas converted at 6:1.";
-  HELP["Gas IP (Mcf/d)"]="Initial gas production rate.";
+  HELP["Gas IP (Mcf/d)"]="IP30 — average wet gas rate over the first 30 days of production.";
+  HELP["Dry Gas IP (Mcf/d)"]="IP30 — average dry (residue) gas rate over the first 30 days.";
+  HELP["Oil IP (bbl/d)"]="IP30 — average oil rate over the first 30 days of production.";
+  HELP["NGL IP (bbl/d)"]="IP30 — average NGL rate over the first 30 days of production.";
+  HELP["Gas Eur (Mcf)"]="Estimated ultimate recovery of wet (wellhead) gas.";
+  HELP["Dry Gas EUR (Mcf)"]="Estimated ultimate recovery of dry (residue) gas, after processing shrink.";
+  HELP["Oil EUR (bbl)"]="Estimated ultimate recovery of oil.";
+  HELP["NGL EUR (bbl)"]="Estimated ultimate recovery of NGL.";
   HELP["Lateral Length"]="Completed lateral length, feet.";
 }
 let sidebarCats=DEFAULT_CATS.slice(), sidebarNums=[];
@@ -1101,8 +1238,8 @@ function currentCfg(){
   const sel={};
   for(const c in fsel) if(fsel[c]&&fsel[c].size<D.cats[c].levels.length)
     sel[c]=[...fsel[c]].map(ix=>D.cats[c].levels[ix]);
-  return {v:6,cats:sidebarCats.slice(),nums:sidebarNums.slice(),sel,
-    ranges:NUMF.map(f=>({m:f.metric,lo:f.lo,hi:f.hi}))};
+  return {v:7,ramp:MAPRAMP,cats:sidebarCats.slice(),nums:sidebarNums.slice(),sel,
+    ranges:NUMF.map(f=>({m:f.metric,lo:f.lo,hi:f.hi,nan:f.keepNaN!==false}))};
 }
 let cfgDeb;
 function saveCfg(){
@@ -1145,6 +1282,11 @@ function applyCfg(cfg){
     if((cfg.v||1)<5&&!sidebarCats.includes("Inventory")) sidebarCats.push("Inventory");
     /* v5 configs predate the First Prod Year filter */
     if((cfg.v||1)<6&&D.cats.FPY&&!sidebarCats.includes("FPY")) sidebarCats.push("FPY");
+    /* v6 configs predate the per-stream IP30 / EUR preloads */
+    if((cfg.v||1)<7) for(const m of STREAM_RATE)
+      if(D.metrics.includes(m)&&!sidebarNums.includes(m)) sidebarNums.push(m);
+    if(cfg.ramp&&RAMPS[cfg.ramp]){ MAPRAMP=cfg.ramp;
+      const rs=document.getElementById("rampsel"); if(rs) rs.value=MAPRAMP; }
     PRESEL=cfg.sel||null; PRERANGE=cfg.ranges||null;
   }
   FCATS=sidebarCats;
@@ -1231,14 +1373,17 @@ function fmtIn(v){ return Math.abs(v)>=1000 ? Math.round(v).toString() : (+v.toP
 function addNumFilter(metric,opts){
   opts=opts||{};
   if(NUMF.some(f=>f.metric===metric)) return;
-  const v=V(metric); let mn=Infinity,mx=-Infinity;
-  for(let i=0;i<D.n;i++){ const x=v[i]; if(isFinite(x)){ if(x<mn)mn=x; if(x>mx)mx=x; } }
+  const v=V(metric); let mn=Infinity,mx=-Infinity,nanN=0;
+  for(let i=0;i<D.n;i++){ const x=v[i]; if(isFinite(x)){ if(x<mn)mn=x; if(x>mx)mx=x; } else nanN++; }
   if(!(mx>mn)) return;
   const lo=isFinite(opts.lo)?Math.max(mn,opts.lo):mn,
         hi=isFinite(opts.hi)?Math.min(mx,opts.hi):mx;
   const active=lo>mn||hi<mx;
   const open=opts.open!=null?opts.open:true;
-  const f={metric,min:mn,max:mx,lo,hi};
+  /* wells with no value for this metric stay in unless the user says otherwise —
+     e.g. every dry-gas well is blank for the NGL breakevens, and narrowing an
+     NGL slider must not silently erase them from the map */
+  const f={metric,min:mn,max:mx,lo,hi,keepNaN:opts.keepNaN!==false,nanN};
   NUMF.push(f);
   const host=document.getElementById("numblocks");
   const div=document.createElement("div");
@@ -1257,6 +1402,9 @@ function addNumFilter(metric,opts){
         <label>Min<input class="ilo" type="text" inputmode="decimal"></label>
         <label>Max<input class="ihi" type="text" inputmode="decimal"></label>
       </div>
+      ${nanN?`<label class="nnan" title="These wells have no value for this metric (for example, dry-gas wells have no NGL breakeven). Untick to exclude them.">
+        <input type="checkbox" class="knan"${f.keepNaN?" checked":""}>
+        keep ${nanN.toLocaleString()} with no value</label>`:""}
     </div>`;
   host.appendChild(div);
   const rlo=div.querySelector(".rlo"), rhi=div.querySelector(".rhi"),
@@ -1283,6 +1431,8 @@ function addNumFilter(metric,opts){
     if(e.target.classList.contains("nrm")) return;
     div.classList.toggle("open");
   });
+  const knan=div.querySelector(".knan");
+  if(knan) knan.addEventListener("change",()=>{ f.keepNaN=knan.checked; applyFilters(); });
   div.querySelector(".nrm").addEventListener("click",()=>{
     NUMF.splice(NUMF.indexOf(f),1);
     const j=sidebarNums.indexOf(metric); if(j>=0) sidebarNums.splice(j,1);
@@ -1298,7 +1448,8 @@ function rebuildNumBlocks(){
   if(PRERANGE) for(const r of PRERANGE) saved[r.m]=r;
   for(const m of sidebarNums){
     const r=saved[m];
-    addNumFilter(m,{lo:r?r.lo:undefined,hi:r?r.hi:undefined,open:false,skipApply:true});
+    addNumFilter(m,{lo:r?r.lo:undefined,hi:r?r.hi:undefined,
+      keepNaN:r&&r.nan!=null?r.nan:true,open:false,skipApply:true});
   }
 }
 document.getElementById("reset").addEventListener("click",()=>{
@@ -1473,7 +1624,7 @@ document.getElementById("mf-apply").addEventListener("click",()=>{
   PRESEL={};
   for(const c in fsel) if(fsel[c]&&fsel[c].size)
     PRESEL[c]=[...fsel[c]].map(ix=>D.cats[c].levels[ix]);
-  PRERANGE=NUMF.map(f=>({m:f.metric,lo:f.lo,hi:f.hi}));
+  PRERANGE=NUMF.map(f=>({m:f.metric,lo:f.lo,hi:f.hi,nan:f.keepNaN!==false}));
   sidebarCats=stCats.slice(); sidebarNums=stNums.slice();
   mfClose(); rebuildFromConfig();
 });
@@ -1511,7 +1662,7 @@ function fullSel(cat){
 const PADFCATS=["Play","County","State","Operator","Subbasin"];
 function applyFilters(){
   nSel=0;
-  const numArr=NUMF.map(f=>({v:V(f.metric),lo:f.lo,hi:f.hi,
+  const numArr=NUMF.map(f=>({v:V(f.metric),lo:f.lo,hi:f.hi,keepNaN:f.keepNaN!==false,
     all:f.lo<=f.min&&f.hi>=f.max}));
   for(let i=0;i<D.n;i++){
     let ok=1;
@@ -1522,7 +1673,8 @@ function applyFilters(){
     if(ok) for(const f of numArr){
       if(f.all) continue;
       const x=f.v[i];
-      if(!isFinite(x)||x<f.lo||x>f.hi){ ok=0; break; }
+      if(!isFinite(x)){ if(f.keepNaN) continue; ok=0; break; }
+      if(x<f.lo||x>f.hi){ ok=0; break; }
     }
     SEL[i]=ok; nSel+=ok;
   }
@@ -1551,7 +1703,8 @@ function applyFilters(){
         wantD[c]=new Set([...s].map(ix=>D.cats[c].levels[ix]));
     }
     const numD=NUMF.filter(f=>DD.metrics&&DD.metrics.includes(f.metric))
-      .map(f=>({v:DV(f.metric),lo:f.lo,hi:f.hi,all:f.lo<=f.min&&f.hi>=f.max}));
+      .map(f=>({v:DV(f.metric),lo:f.lo,hi:f.hi,keepNaN:f.keepNaN!==false,
+                all:f.lo<=f.min&&f.hi>=f.max}));
     for(let i=0;i<DD.n;i++){
       let ok=1;
       for(const c in wantD)
@@ -1622,12 +1775,16 @@ document.getElementById("mapexport").addEventListener("click",()=>{
       c.fillStyle=col; c.fillRect(lx,y-8*d,9*d,9*d);
       c.fillStyle=css("--ink2"); c.fillText(L,lx+13*d,y);
     });
-  } else {
-    for(let x=0;x<180;x++){ c.fillStyle=rampColor(x/179); c.fillRect(lx+x*d,ly-9*d,d,9*d); }
-    c.fillStyle=css("--ink2");
-    c.fillText(fmt(domain[0]),lx,ly+11*d);
-    c.textAlign="right"; c.fillText(fmt(domain[1]),lx+180*d,ly+11*d);
-    c.textAlign="left";
+  } else if(NBINS){
+    const items=[];
+    for(let b=9;b>=0;b--) if(NBINS.counts[b])
+      items.push([`${fmt(NBINS.edges[b])} – ${fmt(NBINS.edges[b+1])}`,NBINS.colors[b]]);
+    if(NBINS.nan) items.push(["no value",css("--nan")]);
+    items.forEach(([L,col],i)=>{
+      const y=ly-(items.length-1-i)*15*d;
+      c.fillStyle=col; c.fillRect(lx,y-8*d,9*d,9*d);
+      c.fillStyle=css("--ink2"); c.fillText(L,lx+13*d,y);
+    });
   }
   out.toBlob(b=>{
     const a=document.createElement("a");
@@ -1713,7 +1870,7 @@ function buildCatColors(){
     const order=[...counts.keys()].filter(ix=>counts[ix]>0)
       .sort((a,b)=>counts[b]-counts[a]);
     order.forEach((ix,i)=>{
-      if(i<MAXC){ cmap[ix]=catColorAt(i);
+      if(i<MAXC){ cmap[ix]=catColorFor(key,cat.levels[ix]);
         legend.push([cat.levels[ix],cmap[ix],counts[ix]]); }
     });
     if(order.length>MAXC){
@@ -1723,18 +1880,34 @@ function buildCatColors(){
   }
   CATC={key,cat,cmap,legend};
 }
+let NBINS=null;   /* {edges[11],colors[10],counts[10],nan} for the numeric colour-by */
 function computeDomain(){
+  NBINS=null;
   if(colorCatKey()){ domain=[0,1]; return; }
   const pads=mapMode==="pads";
   const v=pads?PV(MV.padcolor):V(MV.colorby),
         sel=pads?SELP:SEL, n=pads?D.pads.n:D.n, a=[];
-  for(let i=0;i<n;i++) if(sel[i]&&isFinite(v[i])) a.push(v[i]);
+  let nan=0;
+  for(let i=0;i<n;i++) if(sel[i]){ if(isFinite(v[i])) a.push(v[i]); else nan++; }
   a.sort((x,y)=>x-y);
-  if(!a.length){ domain=[0,1]; return; }
-  domain=[a[Math.floor(a.length*.02)], a[Math.min(a.length-1,Math.floor(a.length*.98))]];
-  if(domain[0]===domain[1]) domain=[domain[0]-1,domain[1]+1];
+  if(!a.length){ domain=[0,1]; NBINS={edges:new Array(11).fill(0),colors:binColors(null),counts:new Array(10).fill(0),nan}; return; }
+  domain=[a[0],a[a.length-1]];
+  /* deciles: 10 equal-count bins over the filtered wells */
+  const edges=[a[0]];
+  for(let b=1;b<10;b++) edges.push(a[Math.min(a.length-1,Math.floor(a.length*b/10))]);
+  edges.push(a[a.length-1]);
+  const counts=new Array(10).fill(0);
+  for(const x of a) counts[binOf(edges,x)]++;
+  NBINS={edges,colors:binColors(edges),counts,nan,
+         zeroBin:(edges[0]<0&&edges[10]>0)?binOf(edges,0):-1};
 }
+let SIZEOVERRIDE=null;   /* {w,h} in device px while a PNG is being rendered */
+let PNGWIDE=false;       /* true only while the 16:9 export re-renders */
+/* bar thickness: fixed on screen, but a slide-sized canvas would otherwise
+   leave hairline bars floating in white space, so let them grow with the row */
+const barH=(step,d)=>Math.min(PNGWIDE?Math.min(96*d,step*0.62):24*d,step-3*d);
 function sizeCanvas(c){
+  if(SIZEOVERRIDE){ c.width=SIZEOVERRIDE.w; c.height=SIZEOVERRIDE.h; return; }
   const r=c.parentElement.getBoundingClientRect(), d=devicePixelRatio||1;
   c.width=Math.max(50,Math.round(r.width*d)); c.height=Math.max(50,Math.round(r.height*d));
 }
@@ -1771,7 +1944,6 @@ function drawMap(){
         mapX.fillText(wn.n.toUpperCase(), px(wn.c[0]), py(wn.c[1]));
     }
   }
-  const span=domain[1]-domain[0], B=24;
   if(CATC){
     /* categorical colour-by */
     const {cat,cmap}=CATC;
@@ -1805,14 +1977,12 @@ function drawMap(){
     }
   } else if(mapMode==="pads"){
     const P=D.pads, v=PV(MV.padcolor);
-    const fills=Array.from({length:B},()=>new Path2D());
+    const fills=Array.from({length:10},()=>new Path2D());
     const nanPath=new Path2D(), outline=new Path2D();
     for(let i=0;i<P.n;i++){
       if(!SELP[i]) continue;
       const r=P.rings[i];
-      const path = isFinite(v[i])
-        ? fills[Math.min(B-1,Math.max(0,Math.floor((v[i]-domain[0])/span*B)))]
-        : nanPath;
+      const path = isFinite(v[i]) ? fills[binOf(NBINS.edges,v[i])] : nanPath;
       path.moveTo(px(r[0][0]),py(r[0][1]));
       outline.moveTo(px(r[0][0]),py(r[0][1]));
       for(let k=1;k<r.length;k++){
@@ -1822,7 +1992,7 @@ function drawMap(){
       path.closePath(); outline.closePath();
     }
     mapX.fillStyle=css("--nan"); mapX.globalAlpha=.55; mapX.fill(nanPath); mapX.globalAlpha=1;
-    for(let b=0;b<B;b++){ mapX.fillStyle=rampColor((b+.5)/B); mapX.fill(fills[b]); }
+    for(let b=0;b<10;b++){ mapX.fillStyle=NBINS.colors[b]; mapX.fill(fills[b]); }
     mapX.lineWidth=.5*d; mapX.strokeStyle=css("--statebd");
     mapX.globalAlpha=.5; mapX.stroke(outline); mapX.globalAlpha=1;
   } else {
@@ -1834,15 +2004,14 @@ function drawMap(){
       const g=D.geo[i]; mapX.moveTo(px(g[0]),py(g[1])); mapX.lineTo(px(g[2]),py(g[3]));
     }
     mapX.strokeStyle=css("--nan"); mapX.stroke();
-    const paths=Array.from({length:B},()=>new Path2D());
+    const paths=Array.from({length:10},()=>new Path2D());
     for(let i=0;i<D.n;i++){
       if(!SEL[i]) continue; const val=v[i];
       if(!isFinite(val)) continue;
-      const t=Math.max(0,Math.min(1,(val-domain[0])/span));
-      const g=D.geo[i], p=paths[Math.min(B-1,Math.floor(t*B))];
+      const g=D.geo[i], p=paths[binOf(NBINS.edges,val)];
       p.moveTo(px(g[0]),py(g[1])); p.lineTo(px(g[2]),py(g[3]));
     }
-    for(let b=0;b<B;b++){ mapX.strokeStyle=rampColor((b+.5)/B); mapX.stroke(paths[b]); }
+    for(let b=0;b<10;b++){ mapX.strokeStyle=NBINS.colors[b]; mapX.stroke(paths[b]); }
   }
   /* dropped shapefile layers on top (pipes etc. stay visible) */
   for(const L of USERLAYERS){
@@ -1863,6 +2032,13 @@ function drawMap(){
     }
   }
 }
+{
+  const sel=document.getElementById("rampsel");
+  sel.innerHTML=Object.keys(RAMP_LABEL).map(k=>
+    `<option value="${k}">${RAMP_LABEL[k]}</option>`).join("");
+  sel.value=MAPRAMP;
+  sel.addEventListener("change",()=>{ MAPRAMP=sel.value; saveCfg(); drawMap(); drawLegend(); });
+}
 function drawLegend(){
   document.getElementById("lg-title").textContent=curColorMetric();
   const rc=document.getElementById("ramp"),
@@ -1877,12 +2053,22 @@ function drawLegend(){
        <span class="n">${n.toLocaleString()}</span></div>`).join("");
     return;
   }
-  rc.style.display=""; row.style.display=""; nan.style.display=""; cats.style.display="none";
-  const ctx=rc.getContext("2d");
-  for(let x=0;x<rc.width;x++){ ctx.fillStyle=rampColor(x/(rc.width-1)); ctx.fillRect(x,0,1,rc.height); }
-  document.getElementById("lg-min").textContent=fmt(domain[0]);
-  document.getElementById("lg-mid").textContent=fmt((domain[0]+domain[1])/2);
-  document.getElementById("lg-max").textContent=fmt(domain[1]);
+  /* numeric: decile rows, highest bin (red) on top, with well counts */
+  rc.style.display="none"; row.style.display="none"; nan.style.display="none";
+  cats.style.display="";
+  const NB=NBINS||{edges:new Array(11).fill(0),colors:binColors(),counts:new Array(10).fill(0),nan:0};
+  const rows2=[];
+  let tot=NB.nan;
+  for(let b=9;b>=0;b--){
+    tot+=NB.counts[b];
+    if(!NB.counts[b]) continue;
+    rows2.push(`<div class="lgc"><i style="background:${NB.colors[b]}"></i><span class="l">${fmt(NB.edges[b])} – ${fmt(NB.edges[b+1])}</span><span class="n">${NB.counts[b].toLocaleString()}</span></div>`);
+    if(NB.zeroBin===b&&MAPRAMP==="rdylgn")
+      rows2.push(`<div class="lgc" style="opacity:.7"><i style="background:transparent;border-top:1px dashed var(--muted);height:0"></i><span class="l" style="font-size:9.5px">zero — red below, green above</span><span class="n"></span></div>`);
+  }
+  if(NB.nan) rows2.push(`<div class="lgc"><i style="background:${css("--nan")}"></i><span class="l">no value</span><span class="n">${NB.nan.toLocaleString()}</span></div>`);
+  rows2.push(`<div class="lgc" style="font-weight:600"><i style="background:transparent"></i><span class="l">Total</span><span class="n">${tot.toLocaleString()}</span></div>`);
+  cats.innerHTML=rows2.join("");
 }
 let drag=null;
 mapC.addEventListener("mousedown",e=>{ drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y}; });
@@ -2204,7 +2390,8 @@ function drawChart2(){
     const lo=Math.min(0,...rows.map(r=>r.mean)), hi=Math.max(0,...rows.map(r=>r.mean));
     const ML=Math.min(150*d, 8*d+Math.max(...rows.map(r=>r.label.length))*6.4*d), MR=66*d, MT=8*d, MB=40*d;
     const span=hi-lo||1, X=x=>ML+(x-lo)/span*(w-ML-MR);
-    const step=(h-MT-MB)/rows.length, bh=Math.min(26*d,step-2*d);
+    const step=(h-MT-MB)/rows.length,
+          bh=Math.min(PNGWIDE?Math.min(96*d,step*0.62):26*d,step-2*d);
     /* ppt style: black bottom axis + outside ticks, zero line, bold title */
     c2x.strokeStyle=css("--ink"); c2x.lineWidth=1*d;
     c2x.beginPath(); c2x.moveTo(X(0),MT); c2x.lineTo(X(0),h-MB); c2x.stroke();
@@ -2426,7 +2613,8 @@ function drawChart2(){
     c2x.fillStyle=css("--muted"); c2x.font=`${10.5*d}px Poppins,system-ui,sans-serif`; c2x.textAlign="right";
     for(let i=0;i<=4;i++){ const n=maxn*i/4; c2x.fillText(fmt(n),ML-7*d,Y(n)+4*d);
       c2x.beginPath(); c2x.moveTo(ML-3*d,Y(n)); c2x.lineTo(ML,Y(n)); c2x.stroke(); }
-    const scol=i=>i===S-1&&hasOther?css("--nan"):catColorAt(i);
+    const gk=LBL2CAT[group]||group;
+    const scol=i=>i===S-1&&hasOther?css("--nan"):catColorFor(gk,stacks[i]);
     rows.forEach((r,i)=>{
       let acc=0;
       r.segs.forEach((n,si)=>{
@@ -2456,7 +2644,7 @@ function drawChart2(){
     c2x.fillStyle=ink; c2x.textAlign="center"; c2x.font=`700 ${11*d}px Poppins,system-ui,sans-serif`;
     const lab=`Wells at or below each ${metric} tranche`;
     c2x.fillText(lab.length>60?lab.slice(0,59)+"…":lab,(ML+w-MR)/2,h-6*d);
-    c2Geom={type:"tranche",mode:"v",rows,X,bw,MT,MB,h,d,metric,total:a.length,stacks};
+    c2Geom={type:"tranche",mode:"v",rows,X,bw,MT,MB,h,d,metric,total:a.length,stacks,scolors:stacks.map((_,i)=>scol(i))};
   } else {
     const full=[];
     for(let i=0;i<D.n;i++){ const x=v[i]; if(isFinite(x)) full.push(x); }
@@ -2645,7 +2833,7 @@ function renderStack(canvas,ctx,data,pct,measure,colors){
   const ML=Math.min(150*d, 10*d+Math.max(...rows.map(r=>r.label.length))*6.3*d);
   const MR=pct?46*d:70*d, MB=36*d;
   const X=v=>ML+(v/(pct?100:maxTot))*(w-ML-MR);
-  const step=(h-MT-MB)/rows.length, bh=Math.min(24*d,step-3*d);
+  const step=(h-MT-MB)/rows.length, bh=barH(step,d);
   /* axis */
   ctx.strokeStyle=css("--base"); ctx.lineWidth=1*d;
   ctx.beginPath(); ctx.moveTo(ML,MT); ctx.lineTo(ML,h-MB); ctx.stroke();
@@ -2696,8 +2884,8 @@ function drawInv(){
                    "Q1":css("--t1"),"Q2":css("--t2"),"Q3":css("--t3"),"Q4":css("--t4")};
     colors=data.stackLevels.map(L=>tiermap[L]||css("--nan"));
   } else {
-    colors=stackPalette(7).slice(0,data.stackLevels.length);
-    if(data.stackLevels[data.stackLevels.length-1]==="Other") colors[data.stackLevels.length-1]=css("--nan");
+    const ck=LBL2CAT[col]||col;
+    colors=data.stackLevels.map(L=>L==="Other"?css("--nan"):catColorFor(ck,L));
   }
   invGeom=renderStack(invC,invC.getContext("2d"),data,invPct,meas,colors);
 }
@@ -2899,8 +3087,13 @@ function drawTrend(){
   trX.strokeStyle=ink; trX.lineWidth=1*d;
   trX.beginPath(); trX.moveTo(ML,MT); trX.lineTo(ML,h-MB); trX.lineTo(w-MR,h-MB); trX.stroke();
   trX.fillStyle=css("--muted"); trX.font=`${10.5*d}px Poppins,system-ui,sans-serif`; trX.textAlign="center";
-  const nyr=Math.min(8,x1-x0);
-  for(let i=0;i<=nyr;i++){ const xv=Math.round(x0+(x1-x0)*i/nyr), gx=X(xv);
+  /* one tick per whole year — interpolating a fixed tick count used to round
+     a fractional year onto its neighbour and silently drop a year (2021).
+     Only thin out (every 2nd, 3rd…) if the years would not fit the width. */
+  const spanY=x1-x0+1;
+  const fitY=Math.max(2,Math.floor((w-ML-MR)/(34*d)));
+  const stepY=Math.max(1,Math.ceil(spanY/fitY));
+  for(let xv=x0;xv<=x1;xv+=stepY){ const gx=X(xv);
     trX.fillText(xv,gx,h-MB+14*d);
     trX.beginPath(); trX.moveTo(gx,h-MB); trX.lineTo(gx,h-MB+4*d); trX.stroke(); }
   if(hasU){
@@ -3037,7 +3230,9 @@ function projRender(){
 }
 document.getElementById("projbtn").addEventListener("click",()=>{
   const open=pjMenu.classList.toggle("open");
-  if(open) projRender();
+  if(open){ projRender();
+    const nb=document.getElementById("pj-name");
+    if(!nb.value&&CURPROJ) nb.value=CURPROJ; }
 });
 document.addEventListener("mousedown",e=>{
   if(pjMenu.classList.contains("open")&&!pjMenu.contains(e.target)
@@ -3048,6 +3243,7 @@ document.getElementById("pj-save").addEventListener("click",()=>{
   if(!name) return;
   PROJECTS[name]={cfg:currentCfg(),saved:new Date().toISOString()};
   projPersist(); projRender();
+  CURPROJ=name; projBtnLabel();
   document.getElementById("pj-name").value="";
 });
 document.getElementById("pj-name").addEventListener("keydown",e=>{
@@ -3060,6 +3256,7 @@ document.getElementById("pj-list").addEventListener("click",e=>{
     delete PROJECTS[n]; projPersist(); projRender(); return;
   }
   if(!PROJECTS[n]) return;
+  CURPROJ=n; projBtnLabel();
   applyCfg(PROJECTS[n].cfg);
   pjMenu.classList.remove("open");
   rebuildFromConfig();
@@ -3067,8 +3264,58 @@ document.getElementById("pj-list").addEventListener("click",e=>{
 document.getElementById("pj-base").addEventListener("click",()=>{
   /* main view: default filter drawer, every well loaded */
   applyCfg(null); PRESEL=null; PRERANGE=null;
+  CURPROJ=null; projBtnLabel();
   pjMenu.classList.remove("open");
   rebuildFromConfig();
+});
+
+/* ── startup gate ── the app is already built on the full unfiltered data;
+   this only chooses whether to lay a saved project's filters over it ── */
+let CURPROJ=null;
+function projBtnLabel(){
+  document.getElementById("projbtn").textContent=
+    (CURPROJ?"Project: "+(CURPROJ.length>16?CURPROJ.slice(0,15)+"…":CURPROJ):"Projects")+" ▾";
+}
+function gateRender(){
+  const host=document.getElementById("sg-list");
+  const names=Object.keys(PROJECTS).sort((a,b)=>
+    (PROJECTS[b].saved||"").localeCompare(PROJECTS[a].saved||""));
+  host.innerHTML=names.map(n=>`<div class="sgitem" data-n="${esc(n)}"><span>${esc(n)}</span>
+      <span class="dt">${esc((PROJECTS[n].saved||"").slice(0,10))}</span>
+      <button class="rm" title="Delete project">✕</button></div>`).join("")
+    ||`<div class="none">No saved projects yet — start a new one above.</div>`;
+}
+function gateClose(){ document.getElementById("startgate").classList.remove("open"); }
+function gateOpen(){
+  const g=document.getElementById("startgate");
+  document.getElementById("sg-sub").textContent=
+    document.getElementById("subtitle").textContent;
+  gateRender();
+  g.classList.add("open");
+  setTimeout(()=>document.getElementById("sg-name").focus(),30);
+}
+document.getElementById("sg-new").addEventListener("click",()=>{
+  const nm=document.getElementById("sg-name").value.trim();
+  /* already loaded fresh and unfiltered — just name it if they typed one */
+  CURPROJ=nm||null;
+  if(nm){ PROJECTS[nm]={cfg:currentCfg(),saved:new Date().toISOString()};
+    projPersist(); projRender(); }
+  projBtnLabel(); gateClose();
+});
+document.getElementById("sg-name").addEventListener("keydown",e=>{
+  if(e.key==="Enter") document.getElementById("sg-new").click();
+});
+document.getElementById("sg-list").addEventListener("click",e=>{
+  const it=e.target.closest(".sgitem"); if(!it||!it.dataset.n) return;
+  const n=it.dataset.n;
+  if(e.target.classList.contains("rm")){
+    delete PROJECTS[n]; projPersist(); projRender(); gateRender(); return;
+  }
+  if(!PROJECTS[n]) return;
+  CURPROJ=n; projBtnLabel();
+  applyCfg(PROJECTS[n].cfg);
+  rebuildFromConfig();
+  gateClose();
 });
 
 /* ── Quick-Eval: production wedge (from NGL_ForecastWellMonths) ── */
@@ -3081,32 +3328,56 @@ async function parseWedgeBuf(buf){
   const dv=new DataView(raw.buffer,raw.byteOffset,4);
   const hl=dv.getUint32(0,true);
   const hdr=JSON.parse(new TextDecoder().decode(raw.subarray(4,4+hl)));
+  if(hdr.v!==3||!hdr.apis) throw new Error("old wedge cache — delete _cache_wedge.bin / wedge.bin and rebuild");
+  const m=hdr.m, R=hdr.apis.length;
+  /* the header names the planes each well block carries: always oil, gas and
+     total NGL, plus the five purity products when the export populates them */
+  const streams=hdr.streams||["oil","gas","ngl"], NS=streams.length;
+  const src=new Uint16Array(raw.slice(4+hl,4+hl+R*NS*m*2).buffer);
+  const q=new Uint16Array(D.drilled.n*NS*m);
+  const idx=new Map(D.drilled.ids.map((a2,i)=>[String(a2),i]));
+  let hit=0;
+  hdr.apis.forEach((a2,r2)=>{
+    const i=idx.get(String(a2)); if(i==null) return;
+    q.set(src.subarray(r2*NS*m,(r2+1)*NS*m),i*NS*m); hit++;
+  });
   const [y,mo]=hdr.start.split("-").map(Number);
-  const m=hdr.m;
-  if(hdr.apis){
-    /* keyed cache (built by serve.py from the raw TSV) — match on API10 */
-    const R=hdr.apis.length;
-    const src=new Uint16Array(raw.slice(4+hl,4+hl+R*m*2).buffer);
-    const q=new Uint16Array(D.drilled.n*m);
-    const idx=new Map(D.drilled.ids.map((a,i)=>[String(a),i]));
-    let hit=0;
-    hdr.apis.forEach((a,r2)=>{
-      const i=idx.get(String(a)); if(i==null) return;
-      q.set(src.subarray(r2*m,(r2+1)*m),i*m); hit++;
-    });
-    WEDGE={n:D.drilled.n,m,start:y*12+mo-1,q};
-    document.getElementById("wedgenote").textContent=
-      `monthly gas, ${hdr.start} onward · ${hit.toLocaleString()} wells matched`;
-  } else {
-    if(hdr.n!==D.drilled.n) throw new Error("wedge.bin is for a different dataset");
-    const n=hdr.n;
-    const fstart=new Uint16Array(raw.slice(4+hl,4+hl+n*2).buffer);
-    const q=new Uint16Array(raw.slice(4+hl+n*2,4+hl+n*2+n*m*2).buffer);
-    WEDGE={n,m,start:y*12+mo-1,fstart,q};
-    document.getElementById("wedgenote").textContent=
-      "monthly gas, "+hdr.start+" onward · corrected operators via WellDetails";
-  }
+  WEDGE={n:D.drilled.n,m,start:y*12+mo-1,q,streams,ns:NS};
+  rebuildStreamSel();
+  document.getElementById("wedgenote").textContent=
+    `${streams.join(" · ")}, ${hdr.start} onward · ${hit.toLocaleString()} wells matched`;
   if(curTab==="Quick-Eval") drawWedge();
+}
+/* stream planes inside each per-well block. The first three are always
+   [oil | dry gas | total NGL]; an export that reports the purity split adds
+   ethane…pentanes after them, and the model prices those individually. */
+const S_OIL=0,S_GAS=1,S_NGL=2;
+const PURITY=["ethane","propane","butane","isobutane","pentanes"];
+const PURITY_LABEL={ethane:"Ethane",propane:"Propane",butane:"Butane",
+  isobutane:"Isobutane",pentanes:"Pentanes+"};
+/* plane index of a named stream in a parsed block, or -1 */
+const planeOf=(o,name)=>o&&o.streams?o.streams.indexOf(name):(name==="oil"?S_OIL:name==="gas"?S_GAS:name==="ngl"?S_NGL:-1);
+const hasPurity=o=>!!o&&PURITY.some(k=>planeOf(o,k)>=0);
+const STREAM_META={oil:["Oil","bbl/d"],gas:["Dry gas","Mcf/d"],ngl:["NGL","bbl/d"],
+  wet:["Wet gas","Mcf/d"],ethane:["Ethane","bbl/d"],propane:["Propane","bbl/d"],
+  butane:["Butane","bbl/d"],isobutane:["Isobutane","bbl/d"],pentanes:["Pentanes+","bbl/d"]};
+const STREAM_ORDER=["gas","oil","ngl","wet",...PURITY];
+/* the chart offers whatever the parsed file actually carries */
+function streamDefs(){
+  const st=(WEDGE&&WEDGE.streams)||["oil","gas","ngl"];
+  return STREAM_ORDER.filter(k=>st.indexOf(k)>=0)
+    .map(k=>[STREAM_META[k][0],STREAM_META[k][1],st.indexOf(k)]);
+}
+let wedgeStream=0;   /* index into streamDefs() — dry gas by default */
+function rebuildStreamSel(){
+  const sel=document.getElementById("wedgestream"), defs=streamDefs();
+  if(wedgeStream>=defs.length) wedgeStream=0;
+  sel.innerHTML=defs.map((sd,i)=>`<option value="${i}"${i===wedgeStream?" selected":""}>${sd[0]}</option>`).join("");
+}
+{
+  const sel=document.getElementById("wedgestream");
+  rebuildStreamSel();
+  sel.addEventListener("change",()=>{ wedgeStream=+sel.value; drawWedge(); });
 }
 /* tiny IndexedDB cache so a parsed production file only ever parses once */
 function idbOpen(){ return new Promise((res,rej)=>{
@@ -3119,14 +3390,17 @@ async function idbGet(k){ try{ const db=await idbOpen();
 async function idbPut(k,v){ try{ const db=await idbOpen();
   await new Promise(res=>{ const t=db.transaction("kv","readwrite").objectStore("kv").put(v,k);
     t.onsuccess=res; t.onerror=res; }); }catch(e){} }
-const wedgeKey=()=>"wedge:"+D.generated+":"+D.drilled.n;
-const tcKey=()=>"tcurves:"+D.generated+":"+D.n;
+const wedgeKey=()=>"wedge3:"+D.generated+":"+D.drilled.n;
+const tcKey=()=>"tcurves3:"+D.generated+":"+D.n;
 const wnote=t=>{ document.getElementById("wedgenote").textContent=t; };
-function setWedge(q,m,start){
-  WEDGE={n:D.drilled.n,m,start,q};
+function setWedge(q,m,start,streams){
+  streams=streams||["oil","gas","ngl"];
+  WEDGE={n:D.drilled.n,m,start,q,streams,ns:streams.length};
+  rebuildStreamSel();
   if(curTab==="Quick-Eval") drawWedge();
 }
-async function cacheWedge(){ if(WEDGE) idbPut(wedgeKey(),{q:WEDGE.q.buffer,m:WEDGE.m,start:WEDGE.start}); }
+async function cacheWedge(){ if(WEDGE) idbPut(wedgeKey(),
+  {q:WEDGE.q.buffer,m:WEDGE.m,start:WEDGE.start,streams:WEDGE.streams}); }
 /* generic line-streamer: parses a multi-GB file without holding it in memory */
 async function streamParse(file,sep,onHeader,onLine,onProg){
   const reader=file.stream().getReader(), dec=new TextDecoder();
@@ -3149,60 +3423,88 @@ async function streamParse(file,sep,onHeader,onLine,onProg){
 /* the raw NGL_ForecastWellMonths export, parsed in the browser */
 async function parseWedgeTsv(file){
   const t0=performance.now();
-  const idx=new Map(D.drilled.ids.map((a,i)=>[a,String(i)]));
+  const idx=new Map(D.drilled.ids.map((a,i)=>[a,i]));
   const START=2010*12, M=432;
-  const q=new Uint16Array(D.drilled.n*M);
-  let ai=0,di=1,gi=9,used=0;
+  let NS=3, streams=["oil","gas","ngl"];
+  let q=new Uint16Array(D.drilled.n*NS*M);
+  let C={},used=0;
+  /* purity columns exist in the schema but are usually empty; only pay for the
+     extra planes if a real purity volume actually turns up */
+  const growPurity=()=>{
+    const oldNS=NS, oldQ=q;
+    streams=["oil","gas","ngl",...PURITY]; NS=streams.length;
+    q=new Uint16Array(D.drilled.n*NS*M);
+    for(let i=0;i<D.drilled.n;i++)
+      q.set(oldQ.subarray(i*oldNS*M,(i+1)*oldNS*M),i*NS*M);
+    wnote("purity products found — pricing NGL by component");
+  };
   const gb=(file.size/1e9).toFixed(1);
   wnote(`parsing ${file.name} (${gb} GB)… 0%`);
   await streamParse(file,"\t",hdr=>{
-    ai=hdr.indexOf("API10"); di=hdr.indexOf("Date"); gi=hdr.indexOf("GasPerDay");
-    if(ai<0||di<0||gi<0) throw new Error("missing API10 / Date / GasPerDay columns");
+    for(const k of ["API10","Date","OilPerDay","NGLPerDay","DryGasPerDay"])
+      if(hdr.indexOf(k)<0) throw new Error("missing column "+k);
+    C={a:hdr.indexOf("API10"),d:hdr.indexOf("Date"),
+       o:hdr.indexOf("OilPerDay"),n:hdr.indexOf("NGLPerDay"),g:hdr.indexOf("DryGasPerDay"),
+       pur:["EthanePerDay","PropanePerDay","ButanePerDay","IsobutanePerDay","PentanesPerDay"]
+            .map(k=>hdr.indexOf(k))};
   },ln=>{
     const p=ln.split("\t");
-    const i=idx.get(p[ai]); if(i==null) return;
-    const dt=p[di], y=+dt.slice(0,4), mo=+dt.slice(5,7);
+    const i=idx.get(p[C.a]); if(i==null) return;
+    const dt=p[C.d], y=+dt.slice(0,4), mo=+dt.slice(5,7);
     if(!y||!mo) return;
     const t=y*12+mo-1-START; if(t<0||t>=M) return;
-    const g=+p[gi]; if(!(g>0)) return;
-    q[(+i)*M+t]=g>65534?65534:(g+.5)|0;
+    const oil=+p[C.o]||0, gas=+p[C.g]||0;
+    const pv=C.pur.map(ix=>ix>=0?(+p[ix]||0):0);
+    let ngl=0; for(const v of pv) ngl+=v;
+    const gotPurity=ngl>0;
+    if(!gotPurity) ngl=+p[C.n]||0;    /* purity blank -> aggregate NGL stream */
+    if(!(oil>0)&&!(gas>0)&&!(ngl>0)) return;
+    if(gotPurity&&NS===3) growPurity();
+    const base=i*NS*M, put=(pl,v)=>{ if(v>0) q[base+pl*M+t]=v>65534?65534:(v+.5)|0; };
+    put(S_OIL,oil); put(S_GAS,gas); put(S_NGL,ngl);
+    if(gotPurity) for(let k=0;k<pv.length;k++) put(3+k,pv[k]);
     used++;
   },read=>wnote(`parsing ${file.name}… ${Math.min(99,Math.round(read/file.size*100))}%`));
-  setWedge(q,M,START);
+  setWedge(q,M,START,streams);
   cacheWedge();
   wnote(`${file.name} parsed in ${((performance.now()-t0)/1000).toFixed(0)}s · ${used.toLocaleString()} well-months · cached in this browser`);
 }
-/* raw Undrilled_<play>_ForecastWellMonths.csv exports -> type curves */
+/* raw Undrilled_<play>_ForecastWellMonths.csv -> type curves
+   (calc_ dry gas / NGL preferred, plain columns as fallback; `gas` is the
+   wellhead wet stream, kept because gas lifting cost is charged on it) */
+const TC_STREAMS=["oil","gas","ngl","wet"], TC_NS=4;
 let TCACC=null;
 async function parseTcurvesCsv(file){
   const t0=performance.now();
-  if(!TCACC){
-    TCACC={q:new Uint16Array(D.n*360),oilc:new Float64Array(D.n),gasc:new Float64Array(D.n),files:[]};
-  }
-  const acc=TCACC, idx=new Map(D.id.map((a,i)=>[a,String(i)]));
-  let ii=1,ni=2,oi=3,gi=4;
+  if(!TCACC) TCACC={q:new Uint16Array(D.n*TC_NS*360),files:[]};
+  const acc=TCACC, idx=new Map(D.id.map((a,i)=>[a,i]));
+  let C={};
   wnote(`parsing ${file.name}… 0%`);
   await streamParse(file,",",hdr=>{
-    ii=hdr.indexOf("ip_day"); ni=hdr.indexOf("novi_wellname");
-    oi=hdr.indexOf("oil"); gi=hdr.indexOf("gas");
-    if(ii<0||ni<0||gi<0) throw new Error("missing ip_day / novi_wellname / gas columns");
+    for(const k of ["ip_day","novi_wellname","oil"])
+      if(hdr.indexOf(k)<0) throw new Error("missing column "+k);
+    C={i:hdr.indexOf("ip_day"),w:hdr.indexOf("novi_wellname"),o:hdr.indexOf("oil"),
+       g:hdr.indexOf("calc_DryGasPerDay"),gf:hdr.indexOf("DryGasPerDay"),
+       n:hdr.indexOf("calc_NGLPerDay"),nf:hdr.indexOf("NGLPerDay"),
+       w2:hdr.indexOf("gas")};
   },ln=>{
     const p=ln.split(",");
-    const i=idx.get(p[ni]); if(i==null) return;
-    const ip=+p[ii]; if(!(ip>0)) return;
-    const mo=(ip/30|0)-1; if(mo<0) return;
-    const g=+p[gi]||0, o=+p[oi]||0;
-    if(mo<360) acc.q[(+i)*360+mo]=g>65534?65534:(g+.5)|0;
-    acc.gasc[+i]+=g*30; acc.oilc[+i]+=o*30;
+    const i=idx.get(p[C.w]); if(i==null) return;
+    const ip=+p[C.i]; if(!(ip>0)) return;
+    const mo=(ip/30|0)-1; if(mo<0||mo>=360) return;
+    const oil=+p[C.o]||0;
+    const gas=(C.g>=0?+p[C.g]:0)||(C.gf>=0?+p[C.gf]:0)||0;
+    const ngl=(C.n>=0?+p[C.n]:0)||(C.nf>=0?+p[C.nf]:0)||0;
+    const wet=(C.w2>=0?+p[C.w2]:0)||gas;
+    const base=i*TC_NS*360, put=(pl,v)=>{ if(v>0) acc.q[base+pl*360+mo]=v>65534?65534:(v+.5)|0; };
+    put(0,oil); put(1,gas); put(2,ngl); put(3,wet);
   },read=>wnote(`parsing ${file.name}… ${Math.min(99,Math.round(read/file.size*100))}%`));
   acc.files.push(file.name);
-  const oily=new Float32Array(D.n);
+  TCURVES={n:D.n,m:360,q:acc.q,streams:TC_STREAMS,ns:TC_NS};
+  idbPut(tcKey(),{q:acc.q.buffer,m:360,streams:TC_STREAMS});
   let withCurve=0;
-  for(let i=0;i<D.n;i++){
-    if(acc.gasc[i]>0){ oily[i]=acc.oilc[i]/(acc.gasc[i]/1000); withCurve++; }
-  }
-  TCURVES={n:D.n,m:360,oily,q:acc.q};
-  idbPut(tcKey(),{q:acc.q.buffer,oily:oily.buffer,m:360});
+  for(let i=0;i<D.n;i++){ const b2=i*TC_NS*360;
+    for(let k=0;k<TC_NS*360;k++) if(acc.q[b2+k]){withCurve++;break;} }
   wnote(`${file.name} parsed in ${((performance.now()-t0)/1000).toFixed(0)}s · type curves for ${withCurve.toLocaleString()} of ${D.n.toLocaleString()} undrilled wells`
     +(withCurve<D.n*.9?" — drop the other play's ForecastWellMonths too":""));
 }
@@ -3218,19 +3520,21 @@ async function loadWedge(){
     }catch(e){}
   }
   const c=await idbGet(wedgeKey());
-  if(c){ setWedge(new Uint16Array(c.q),c.m,c.start);
+  if(c){ setWedge(new Uint16Array(c.q),c.m,c.start,c.streams);
     wnote("production wedge loaded from this browser's cache"); return; }
-  wnote("drop NGL_ForecastWellMonths.tsv (or wedge.bin) onto the map — parsed once, then cached");
+  wnote("production wedge not loaded — open the dashboard via Open Dashboard.bat / serve.py (it loads NGL_ForecastWellMonths.tsv automatically); drag-and-drop onto the map also works");
 }
 function drawWedge(){
   sizeCanvas(wedgeC);
   const d=devicePixelRatio||1,w=wedgeC.width,h=wedgeC.height;
   wedgeX.clearRect(0,0,w,h); wedgeGeom=null;
   if(!D.drilled) return chartMsg(wedgeX,w,h,d,"no drilled wells in this build");
-  if(!WEDGE) return chartMsg(wedgeX,w,h,d,"drop NGL_ForecastWellMonths.tsv on the map (parsed once, then cached) — or serve the folder");
+  if(!WEDGE) return chartMsg(wedgeX,w,h,d,"open via Open Dashboard.bat — the server loads the production file automatically");
   /* build the stacked series: by basin normally; PDP + scheduled undrilled
      (Novi well-type colours) once the model has been run */
   const gs=WEDGE.start;
+  const defs=streamDefs();
+  const [sname,sunit,plane]=defs[Math.min(wedgeStream,defs.length-1)];
   let names,colors,sums,M;
   if(QERES){
     const effOff=QERES.eff-gs;
@@ -3239,13 +3543,15 @@ function drawWedge(){
     const q=WEDGE.q,WM=WEDGE.m;
     for(let i=0;i<WEDGE.n;i++){
       if(!SELD[i]) continue;
-      const off=i*WM;
+      const off=i*WEDGE.ns*WM+plane*WM;
       const lim=Math.min(WM,effOff);
       for(let t=0;t<lim;t++) pdp[t]+=q[off+t];
     }
     for(let t=0;t<QERES.T;t++){
       const g=effOff+t; if(g<0||g>=M) continue;
-      pdp[g]+=QERES.pdpGas[t]; pud[g]+=QERES.pudGas[t];
+      const kn=WEDGE.streams[plane];
+      pdp[g]+=(QERES.pdpS[kn]?QERES.pdpS[kn][t]:0);
+      pud[g]+=(QERES.pudS[kn]?QERES.pudS[kn][t]:0);
     }
     const dk=isDark();
     names=["PDP","Scheduled undrilled"];
@@ -3257,14 +3563,14 @@ function drawWedge(){
     const q=WEDGE.q;
     for(let i=0;i<WEDGE.n;i++){
       if(!SELD[i]) continue;
-      const s2=byPlay[pc.ix[i]], off=i*M;
+      const s2=byPlay[pc.ix[i]], off=i*WEDGE.ns*M+plane*M;
       for(let t=0;t<M;t++) s2[t]+=q[off+t];
     }
     const order=[...Array(P).keys()].filter(p=>byPlay[p].some(v=>v>0));
     order.sort((a2,b2)=>{ let sa=0,sb=0;
       for(let t=0;t<M;t++){sa+=byPlay[a2][t];sb+=byPlay[b2][t];} return sb-sa; });
     names=order.map(p=>pc.levels[p]);
-    colors=order.map((_,i)=>catColorAt(i));
+    colors=order.map(p=>catColorFor("Play",pc.levels[p]));
     sums=order.map(p=>byPlay[p]);
   }
   const S=sums.length;
@@ -3314,7 +3620,7 @@ function drawWedge(){
     wedgeX.fillText(fmt(v),ML-7*d,Y(v)+4*d);
     wedgeX.beginPath(); wedgeX.moveTo(ML-3*d,Y(v)); wedgeX.lineTo(ML,Y(v)); wedgeX.stroke(); }
   wedgeX.fillStyle=ink; wedgeX.font=`700 ${11*d}px Poppins,system-ui,sans-serif`;
-  wedgeX.textAlign="left"; wedgeX.fillText("Gas (Mcf/d)",6*d,13*d);
+  wedgeX.textAlign="left"; wedgeX.fillText(`${sname} (${sunit})`,6*d,13*d);
   wedgeX.font=`${10.5*d}px Poppins,system-ui,sans-serif`; wedgeX.textAlign="right";
   names.forEach((nm,pi)=>{
     const y=(12+pi*15)*d;
@@ -3327,7 +3633,7 @@ function drawWedge(){
     wedgeX.font=`${9.5*d}px Poppins,system-ui,sans-serif`;
     wedgeX.fillText("model run — filters changed? re-run",w-MR,(12+S*15+4)*d);
   }
-  wedgeGeom={t0,t1,X,sums,names,d,tot,ML,MR,w,start:gs};
+  wedgeGeom={t0,t1,X,sums,names,colors,d,tot,ML,MR,w,start:gs,sname,sunit};
 }
 wedgeC.addEventListener("mousemove",e=>{
   if(!wedgeGeom){tip.style.display="none";return;}
@@ -3337,9 +3643,9 @@ wedgeC.addEventListener("mousemove",e=>{
   if(t<g.t0||t>g.t1){tip.style.display="none";return;}
   const ym=g.start+t, lab=`${Math.floor(ym/12)}-${String(ym%12+1).padStart(2,"0")}`;
   const rows=g.names.map((nm,p)=>
-    `<tr><td>${nm}</td><td>${fmt(g.sums[p][t])} Mcf/d</td></tr>`).join("");
+    `<tr><td>${nm}</td><td>${fmt(g.sums[p][t])} ${g.sunit}</td></tr>`).join("");
   tip.innerHTML=`<div class="id">${lab}</div><table>${rows}
-    <tr><td><b>Total</b></td><td><b>${fmt(g.tot[t])} Mcf/d</b></td></tr></table>`;
+    <tr><td><b>Total</b></td><td><b>${fmt(g.tot[t])} ${g.sunit}</b></td></tr></table>`;
   placeTip(e);
 });
 wedgeC.addEventListener("mouseleave",()=>tip.style.display="none");
@@ -3350,10 +3656,15 @@ const QE_GROUPS=[["Basin",[]],["County",["County"]],["Operator-Play",["Operator"
 let qeGroupBy="Basin";
 const QESCHED={};   /* groupBy -> {groupKey: number[22]} */
 const QE_PERIODS=(()=>{
+  /* quarterly columns from the current quarter through the end of the
+     calendar year two years out (Q2-2026 now -> through Q4-2028; Q1-2027
+     -> through Q4-2029), then annual for the following 12 years */
   const p=[];
-  for(const q of ["Q3-2026","Q4-2026","Q1-2027","Q2-2027","Q3-2027","Q4-2027",
-                  "Q1-2028","Q2-2028","Q3-2028","Q4-2028"]) p.push([q,1]);
-  for(let y=2029;y<=2040;y++) p.push([String(y),4]);
+  const now=new Date();
+  let y=now.getFullYear(), q=Math.floor(now.getMonth()/3)+1;
+  const endY=y+2;
+  while(y<=endY){ p.push([`Q${q}-${y}`,1]); if(++q>4){ q=1; y++; } }
+  for(let yy=endY+1;yy<=endY+12;yy++) p.push([String(yy),4]);
   return p;
 })();
 {
@@ -3392,7 +3703,7 @@ function renderQE(){
     if(!sched[key]) sched[key]=QE_PERIODS.map(([,mult])=>hist*mult);
     const cells=QE_PERIODS.map(([lab,mult],j)=>
       `<div class="qc${mult===4?" yr":""}"><label>${lab}</label>
-       <input type="number" min="0" step="1" value="${sched[key][j]}" data-j="${j}"></div>`).join("");
+       <input type="number" min="0" step="1" value="${sched[key][j]||0}" data-j="${j}"></div>`).join("");
     return `<div class="qexp" data-key="${esc(key)}">
       <div class="qx-head"><span>${esc(key)}</span>
         <span class="n">${o.n.toLocaleString()} drilled wells</span><span class="chev">▾</span></div>
@@ -3412,34 +3723,23 @@ function renderQE(){
   });
 }
 /* ── Quick-Eval: PDP blowdown + undrilled layering (Camino-style model) ── */
-let TCURVES=null;   /* {n,m,oily:Float32Array,q:Uint16Array} undrilled type curves */
+let TCURVES=null;   /* {n,m,q,streams,ns} — [oil|dry gas|NGL|wet gas(+purity)] */
 async function parseTcurvesBuf(buf){
   const raw=new Uint8Array(await new Response(
     new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
   const hl=new DataView(raw.buffer,raw.byteOffset,4).getUint32(0,true);
   const hdr=JSON.parse(new TextDecoder().decode(raw.subarray(4,4+hl)));
-  const m=hdr.m, sc=hdr.oyscale||0.1;
-  if(hdr.names){
-    const R=hdr.names.length;
-    const oyq=new Uint16Array(raw.slice(4+hl,4+hl+R*2).buffer);
-    const src=new Uint16Array(raw.slice(4+hl+R*2,4+hl+R*2+R*m*2).buffer);
-    const q=new Uint16Array(D.n*m), oily=new Float32Array(D.n);
-    const idx=new Map(D.id.map((a,i)=>[a,i]));
-    hdr.names.forEach((nm,r2)=>{
-      const i=idx.get(nm); if(i==null) return;
-      q.set(src.subarray(r2*m,(r2+1)*m),i*m);
-      oily[i]=oyq[r2]*sc;
-    });
-    TCURVES={n:D.n,m,oily,q};
-  } else {
-    if(hdr.n!==D.n) throw new Error("tcurves.bin is for a different dataset");
-    const n=hdr.n;
-    const oyq=new Uint16Array(raw.slice(4+hl,4+hl+n*2).buffer);
-    const oily=new Float32Array(n);
-    for(let i=0;i<n;i++) oily[i]=oyq[i]*sc;
-    const q=new Uint16Array(raw.slice(4+hl+n*2,4+hl+n*2+n*m*2).buffer);
-    TCURVES={n,m,oily,q};
-  }
+  if(hdr.v!==3||!hdr.names) throw new Error("old type-curve cache — delete _cache_tcurves.bin / tcurves.bin and rebuild");
+  const m=hdr.m, R=hdr.names.length;
+  const streams=hdr.streams||["oil","gas","ngl"], NS=streams.length;
+  const src=new Uint16Array(raw.slice(4+hl,4+hl+R*NS*m*2).buffer);
+  const q=new Uint16Array(D.n*NS*m);
+  const idx=new Map(D.id.map((a2,i)=>[a2,i]));
+  hdr.names.forEach((nm,r2)=>{
+    const i=idx.get(nm); if(i==null) return;
+    q.set(src.subarray(r2*NS*m,(r2+1)*NS*m),i*NS*m);
+  });
+  TCURVES={n:D.n,m,q,streams,ns:NS};
 }
 async function loadTcurves(){
   for(const url of ["/api/tcurves","tcurves.bin"]){
@@ -3449,47 +3749,45 @@ async function loadTcurves(){
     }catch(e){}
   }
   const c=await idbGet(tcKey());
-  if(c) TCURVES={n:D.n,m:c.m,oily:new Float32Array(c.oily),q:new Uint16Array(c.q)};
+  if(c){ const st=c.streams||["oil","gas","ngl"];
+    TCURVES={n:D.n,m:c.m,q:new Uint16Array(c.q),streams:st,ns:st.length}; }
 }
 /* model inputs — the user-edited cells from the Camino PDP model */
+/* Prices, differentials and NRI default to the house 70_3 deck: WTI $70 less
+   $6.50/bbl, HH $3.00 less $0.65/Mcf, NGL $24.50/bbl (ngl_backup, the deck's
+   blended barrel) and royalty 0.22 -> 78% NRI. Production tax is 0 because the
+   deck's Oil/Gas Tax Rate columns are 0 for every Appalachia well — add
+   severance here if you model it. Opex is NOT in the export and is a user
+   assumption: gas lifting is charged on the WET (wellhead) stream, NGL opex is
+   the processing cost, both per unit produced. */
 const QI_DEFS=[
-  ["Pricing",[
-    ["oilp","Oil ($/bbl)",65],["gasp","Gas ($/mmBtu)",3.75],["btu","BTU (mmBtu/Mcf)",1.05],
-    ["nglpct","NGL % of WTI",35],["disc","Discount rate %",10]]],
-  ["Differentials",[
-    ["doil","Oil % diff",3],["dgas","Gas % diff",14],["dngl","NGL % diff",13]]],
-  ["Opex & taxes",[
-    ["loe","LOE ($/boe)",4.25],["gptm","GPTM ($/boe)",3.50],
-    ["tax","Prod tax (% of rev)",5.5],["nri","NRI %",80]]],
-  ["Gas quality (prefilled from filtered wells)",[
-    ["shrink","Shrink (sales/WH %)",null],["yield","NGL yield (bbl/MMcf)",null],
-    ["oily","PDP oil yield (bbl/MMcf)",null]]],
+  ["Pricing (flat, before differentials)",[
+    ["oilp","Oil ($/bbl)",70],["gasp","Gas ($/Mcf, dry)",3.00],
+    ["nglp","NGL ($/bbl)",24.50],["disc","Discount rate %",10]]],
+  ["Differentials (deducted per unit)",[
+    ["doil","Oil ($/bbl)",6.50],["dgas","Gas ($/Mcf)",0.65],["dngl","NGL ($/bbl)",0]]],
+  ["Opex (per unit produced)",[
+    ["opoil","Oil ($/bbl)",5.00],["opgas","Gas lifting ($/Mcf wet)",0.40],
+    ["opngl","NGL processing ($/bbl)",4.44]]],
+  ["Taxes & interest",[
+    ["tax","Prod tax (% of rev)",0],["nri","NRI %",78]]],
+  ["NGL purity products ($/bbl) — used only when the export reports purity volumes",
+    PURITY.map((k,i)=>["p_"+k,PURITY_LABEL[k],[8.40,28,35,49,59.50][i]])],
 ];
 let qiBuilt=false, QERES=null;
-function avgDrilled(m){
-  if(!drilledMetricOk(m)) return null;
-  const v=DV(m); let s=0,n=0;
-  for(let i=0;i<D.drilled.n;i++){ if(!SELD[i]) continue;
-    const x=v[i]; if(isFinite(x)){s+=x;n++;} }
-  return n?s/n:null;
-}
 function buildQI(){
   if(qiBuilt) return;
   qiBuilt=true;
   const host=document.getElementById("qeinputs");
-  const shr=avgDrilled("NGL Shrink"), yld=avgDrilled("NGL Yield (bbl/MMcf)");
-  const oe=avgDrilled("Oil EUR (bbl)"), ge=avgDrilled("Gas Eur (Mcf)");
-  const dflt={shrink:shr!=null?+(shr*100).toFixed(1):92,
-              yield:yld!=null?+yld.toFixed(2):20,
-              oily:(oe&&ge)?+((oe/(ge/1000))).toFixed(2):1};
   host.innerHTML=QI_DEFS.map(([sec,items])=>
     `<div class="qi-sec">${sec}</div><div class="qi-grid">`+
     items.map(([id,lab,v])=>`<div class="qi"><label title="${lab}">${lab}</label>
-      <input id="qi-${id}" type="number" step="any" value="${v!=null?v:dflt[id]}"></div>`).join("")
+      <input id="qi-${id}" type="number" step="any" value="${v}"></div>`).join("")
     +`</div>`).join("")
-    +`<div class="qi-sec">Model — strip-style flat pricing, PDP blown down from the wedge,
-      scheduled undrilled wells layered on their actual forecast curves (best NPV10 first),
-      D&C capex at spud</div><div id="qeres"></div>`;
+    +`<div class="qi-sec">Model — flat prices less absolute differentials and per-unit opex,
+      matching the 70_3 deck; oil, dry gas and NGL each blown down from their own wedge stream,
+      scheduled undrilled wells layered on their actual three-stream forecast curves
+      (best NPV10 first), D&C capex at spud</div><div id="qeres"></div>`;
 }
 function qiv(id){ return parseFloat(document.getElementById("qi-"+id).value)||0; }
 /* monthly spud quotas per group from the active schedule (partials preserved) */
@@ -3536,22 +3834,38 @@ function groupWellRank(key){
   });
   return list;
 }
-function econ(gasRate,oilRate,capex,T,eff,r){
-  /* gasRate Mcf/d avg by month; oilRate bbl/d; capex $ by month (or null) */
-  const yieldIn=qiv("yield"), shrinkF=qiv("shrink")/100, nri=qiv("nri")/100;
-  const wti=qiv("oilp"), gasP=qiv("gasp")*qiv("btu"), nglP=wti*qiv("nglpct")/100;
-  const po=wti*(1-qiv("doil")/100), pg=gasP*(1-qiv("dgas")/100), pn=nglP*(1-qiv("dngl")/100);
-  const opex=qiv("loe")+qiv("gptm"), tax=qiv("tax")/100;
+/* S is {oil,gas,ngl,wet,[ethane…]} of monthly average day-rates.
+   Revenue: oil and dry gas at their realized prices; NGL priced by purity
+   component when those volumes exist, otherwise as one aggregate barrel.
+   Opex: oil $/bbl, gas lifting $/Mcf on the WET stream, NGL processing $/bbl. */
+function econ(S,capex,T,r){
+  const nri=qiv("nri")/100;
+  /* realized price per unit = flat price less an absolute differential, exactly
+     how the house deck works (post_diff_wti / post_diff_nymex). The gas stream
+     is dry residue gas priced per Mcf — no BTU uplift, or the liquids that are
+     already valued as NGL barrels would be paid for twice. */
+  const po=qiv("oilp")-qiv("doil"), pg=qiv("gasp")-qiv("dgas"), pn=qiv("nglp")-qiv("dngl");
+  const co=qiv("opoil"), cg=qiv("opgas"), cn=qiv("opngl"), tax=qiv("tax")/100;
+  const purity=PURITY.filter(k=>S[k]);            /* only when volumes exist */
+  const pp=purity.map(k=>qiv("p_"+k));
+  const oilR=S.oil, gasR=S.gas, nglR=S.ngl, wetR=S.wet||S.gas;
   let pv=0, ntm=0, cum=0, rev12=0;
   const DAYS=30.4375;
   for(let t=0;t<T;t++){
-    const gv=(gasRate[t]||0)*DAYS;                 /* gross WH gas Mcf/mo */
-    const ngl=gv/1000*yieldIn, sales=gv*shrinkF;
-    const oil=(oilRate?(oilRate[t]||0)*DAYS:0);
-    const nOil=oil*nri, nNgl=ngl*nri, nGas=sales*nri;
-    const rev=nOil*po+nNgl*pn+nGas*pg;
-    const boe=nOil+nNgl+nGas/6;
-    let cf=rev-boe*opex-rev*tax;
+    const oil=(oilR[t]||0)*DAYS, gas=(gasR[t]||0)*DAYS, wet=(wetR[t]||0)*DAYS;
+    let ngl=0, nglRev=0;
+    if(purity.length){
+      for(let k=0;k<purity.length;k++){
+        const v=(S[purity[k]][t]||0)*DAYS;
+        ngl+=v; nglRev+=v*nri*pp[k];
+      }
+    } else {
+      ngl=(nglR[t]||0)*DAYS; nglRev=ngl*nri*pn;
+    }
+    const nOil=oil*nri, nGas=gas*nri, nWet=wet*nri, nNgl=ngl*nri;
+    const rev=nOil*po+nGas*pg+nglRev;
+    const opexC=nOil*co+nWet*cg+nNgl*cn;
+    let cf=rev-opexC-rev*tax;
     if(capex) cf-=capex[t]||0;
     const df=Math.pow(1+r,-(t+.5)/12);
     pv+=cf*df; cum+=cf;
@@ -3561,36 +3875,39 @@ function econ(gasRate,oilRate,capex,T,eff,r){
 }
 function runModel(){
   if(!WEDGE){ document.getElementById("qeres").innerHTML=
-    `<span style="color:var(--muted);font-size:12px">wedge.bin not loaded — the PDP wedge is required</span>`; return; }
+    `<span style="color:var(--muted);font-size:12px">production wedge not loaded — serve the folder or drop NGL_ForecastWellMonths.tsv on the map</span>`; return; }
   buildQI();
   const now=new Date(), eff=now.getFullYear()*12+now.getMonth();
   const T=360, r=qiv("disc")/100;
-  /* PDP gas from the filtered wedge, effective date forward */
-  const pdpGas=new Float64Array(T);
+  /* PDP: every stream the wedge carries, effective date forward */
+  const WNS=WEDGE.ns, wStreams=WEDGE.streams;
+  const pdpS={}; wStreams.forEach(k=>pdpS[k]=new Float64Array(T));
   {
     const M=WEDGE.m,q=WEDGE.q,off0=eff-WEDGE.start;
     for(let i=0;i<WEDGE.n;i++){
       if(!SELD[i]) continue;
-      const off=i*M;
-      for(let t=0;t<T;t++){
-        const g=off0+t;
-        if(g>=0&&g<M) pdpGas[t]+=q[off+g];
+      const base=i*WNS*M;
+      for(let sp=0;sp<WNS;sp++){
+        const off=base+sp*M, dst=pdpS[wStreams[sp]];
+        for(let t=0;t<T;t++){
+          const g=off0+t;
+          if(g>=0&&g<M) dst[t]+=q[off+g];
+        }
       }
     }
   }
-  const pdpOil=new Float64Array(T);
-  const oilyIn=qiv("oily");
-  for(let t=0;t<T;t++) pdpOil[t]=pdpGas[t]/1000*oilyIn;
   /* PUD layering per the drill-out script: walk the monthly schedule,
-     spud ranked wells (fractional wells carry partial curves) */
-  const pudGas=new Float64Array(T), pudOil=new Float64Array(T), capex=new Float64Array(T);
+     spud ranked wells (fractional wells carry partial curves) — all three streams */
+  const tStreams=TCURVES?TCURVES.streams:["oil","gas","ngl"];
+  const pudS={}; tStreams.forEach(k=>pudS[k]=new Float64Array(T));
+  const capex=new Float64Array(T);
   let wellsSpud=0, exhausted=[];
   const dcv=V("Total D&C Cost ($)");
   let dcAvg=0,dcN=0;
   for(let i=0;i<D.n;i++) if(SEL[i]&&isFinite(dcv[i])){dcAvg+=dcv[i];dcN++;}
   dcAvg=dcN?dcAvg/dcN:0;
   if(TCURVES){
-    const quotas=scheduleQuotas(eff);
+    const quotas=scheduleQuotas(eff), TM=TCURVES.m, TNS=TCURVES.ns;
     for(const key in quotas){
       const rank=groupWellRank(key), q=quotas[key];
       let wix=0, frac=1;    /* remaining fraction of current well */
@@ -3599,13 +3916,14 @@ function runModel(){
         while(need>1e-9&&wix<rank.length){
           const take=Math.min(frac,need);
           const i=rank[wix];
-          const off=i*TCURVES.m;
-          const lim=Math.min(TCURVES.m,T-t);
-          for(let k=0;k<lim;k++){
-            const g=TCURVES.q[off+k];
-            if(!g) continue;
-            pudGas[t+k]+=take*g;
-            pudOil[t+k]+=take*g*TCURVES.oily[i]/1000;
+          const base=i*TNS*TM;
+          const lim=Math.min(TM,T-t);
+          for(let sp=0;sp<TNS;sp++){
+            const off=base+sp*TM, dst=pudS[tStreams[sp]];
+            for(let k=0;k<lim;k++){
+              const v=TCURVES.q[off+k];
+              if(v) dst[t+k]+=take*v;
+            }
           }
           capex[t]+=take*(isFinite(dcv[i])?dcv[i]:dcAvg);
           wellsSpud+=take;
@@ -3616,10 +3934,10 @@ function runModel(){
       }
     }
   }
-  const pdp=econ(pdpGas,pdpOil,null,T,eff,r);
-  const pud=econ(pudGas,pudOil,capex,T,eff,r);
+  const pdp=econ(pdpS,null,T,r);
+  const pud=econ(pudS,capex,T,r);
   let capexTot=0; for(let t=0;t<T;t++) capexTot+=capex[t];
-  QERES={eff,T,pdpGas,pudGas,pdp,pud,capexTot,wellsSpud,exhausted:[...new Set(exhausted)]};
+  QERES={eff,T,pdpS,pudS,pdp,pud,capexTot,wellsSpud,exhausted:[...new Set(exhausted)]};
   const $M=v=>"$"+(v/1e6).toFixed(1)+"M";
   document.getElementById("qeres").innerHTML=[
     ["PDP PV"+qiv("disc").toFixed(0),$M(pdp.pv)],
@@ -3630,7 +3948,10 @@ function runModel(){
     ["PDP NTM CF",$M(pdp.ntm)],
     ["Combined PV",$M(pdp.pv+pud.pv)],
   ].map(([l,v])=>`<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("")
-  +(TCURVES?"":`<div style="font-size:11px;color:#bf200f;align-self:center">tcurves.bin not loaded — undrilled layer skipped (serve the folder or drop tcurves.bin on the map)</div>`)
+  +`<div style="font-size:11px;color:var(--muted);align-self:center">NGL priced ${
+      hasPurity(WEDGE)?"by purity product (ethane…pentanes+)":"as one aggregate barrel — this export reports no purity volumes"
+    }</div>`
+  +(TCURVES?"":`<div style="font-size:11px;color:#bf200f;align-self:center">type curves not loaded — undrilled layer skipped (serve the folder or drop the Undrilled ForecastWellMonths CSVs on the map)</div>`)
   +(QERES.exhausted.length?`<div style="font-size:11px;color:var(--muted);align-self:center">ran out of inventory: ${QERES.exhausted.slice(0,4).join(", ")}${QERES.exhausted.length>4?"…":""}</div>`:"");
   drawWedge();
 }
@@ -3645,7 +3966,7 @@ document.querySelectorAll("#qemodeseg button").forEach(b=>b.addEventListener("cl
   document.getElementById("qeinputs").style.display=model?"":"none";
   document.getElementById("qegroupseg").style.display=model?"none":"";
   document.getElementById("qehint").textContent=model
-    ?"edit the blue cells, then Run Model — PDP blowdown + scheduled undrilled, valued separately"
+    ?"edit the blue cells, then Run Model — $/bbl and $/Mcf throughout; PDP + scheduled undrilled valued separately"
     :"wells to drill per period · prefilled from each group's last-year drilling pace";
   if(model) buildQI();
 }));
@@ -3713,7 +4034,7 @@ function xlAxes(horiz,catTitle,valTitle){
   const axTxt=t=>t?`<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr b="1" sz="1000"><a:latin typeface="Poppins"/></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" b="1"/><a:t>${xlEsc(t)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`:"";
   const line=`<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="101416"/></a:solidFill></a:ln></c:spPr>`;
   return `<c:catAx><c:axId val="111"/><c:scaling><c:orientation val="${horiz?"maxMin":"minMax"}"/></c:scaling><c:delete val="0"/><c:axPos val="${horiz?"l":"b"}"/>${axTxt(catTitle)}${line}<c:crossAx val="222"/></c:catAx>
-<c:valAx><c:axId val="222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${horiz?"b":"l"}"/>${axTxt(valTitle)}${line}<c:majorGridlines><c:spPr><a:ln><a:noFill/></a:ln></c:spPr></c:majorGridlines><c:crossAx val="111"/></c:valAx>`;
+<c:valAx><c:axId val="222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${horiz?"b":"l"}"/><c:majorGridlines><c:spPr><a:ln><a:noFill/></a:ln></c:spPr></c:majorGridlines>${axTxt(valTitle)}${line}<c:crossAx val="111"/></c:valAx>`;
 }
 function xlCatRef(n){ return `Sheet1!$A$2:$A$${n+1}`; }
 function xlStrCache(vals){ return `<c:ptCount val="${vals.length}"/>`+vals.map((v,i)=>`<c:pt idx="${i}"><c:v>${xlEsc(v)}</c:v></c:pt>`).join(""); }
@@ -3734,8 +4055,8 @@ function xlChart(spec){
 <c:yVal><c:numRef><c:f>Sheet1!$${cy}$2:$${cy}$${n+1}</c:f><c:numCache>${xlNumCache(s.ys)}</c:numCache></c:numRef></c:yVal>
 <c:smooth val="0"/></c:ser>`;}).join("");
     plot=`<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${sers}<c:axId val="111"/><c:axId val="222"/></c:scatterChart>
-<c:valAx><c:axId val="111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/>${spec.xTitle?`<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>${xlEsc(spec.xTitle)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`:""}<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="101416"/></a:solidFill></a:ln></c:spPr><c:majorGridlines><c:spPr><a:ln><a:noFill/></a:ln></c:spPr></c:majorGridlines><c:crossAx val="222"/></c:valAx>
-<c:valAx><c:axId val="222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/>${spec.yTitle?`<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>${xlEsc(spec.yTitle)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`:""}<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="101416"/></a:solidFill></a:ln></c:spPr><c:majorGridlines><c:spPr><a:ln><a:noFill/></a:ln></c:spPr></c:majorGridlines><c:crossAx val="111"/></c:valAx>`;
+<c:valAx><c:axId val="111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:majorGridlines><c:spPr><a:ln><a:noFill/></a:ln></c:spPr></c:majorGridlines>${spec.xTitle?`<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>${xlEsc(spec.xTitle)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`:""}<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="101416"/></a:solidFill></a:ln></c:spPr><c:crossAx val="222"/></c:valAx>
+<c:valAx><c:axId val="222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln><a:noFill/></a:ln></c:spPr></c:majorGridlines>${spec.yTitle?`<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>${xlEsc(spec.yTitle)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`:""}<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="101416"/></a:solidFill></a:ln></c:spPr><c:crossAx val="111"/></c:valAx>`;
   } else {
     const n=spec.cats.length;
     const sers=S.map((s,i)=>{
@@ -3787,18 +4108,18 @@ function xlDownload(fname,aoa,spec){
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`],
     ["xl/styles.xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="10"/><name val="Poppins"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="1"><xf/></cellXfs></styleSheet>`],
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="10"/><name val="Poppins"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`],
     ["xl/worksheets/sheet1.xml",xlSheet(aoa)],
     ["xl/worksheets/_rels/sheet1.xml.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>`],
     ["xl/drawings/drawing1.xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<xdr:twoCellAnchor><xdr:from><xdr:col>${Math.max(3,(aoa[0]||[]).length+1)}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
+<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>${Math.max(3,(aoa[0]||[]).length+1)}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
 <xdr:to><xdr:col>${Math.max(3,(aoa[0]||[]).length+1)+10}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>26</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
 <xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart 1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>
 <xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>
 <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId1"/></a:graphicData></a:graphic>
-</xdr:graphicFrame></xdr:twoCellAnchor></xdr:wsDr>`],
+</xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`],
     ["xl/drawings/_rels/drawing1.xml.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/></Relationships>`],
     ["xl/charts/chart1.xml",xlChart(spec)],
@@ -3848,8 +4169,8 @@ function xlExport(kind){
                   "Q1":css("--t1"),"Q2":css("--t2"),"Q3":css("--t3"),"Q4":css("--t4")};
         colors=data.stackLevels.map(L=>tm[L]||css("--nan"));
       } else {
-        colors=stackPalette(7).slice(0,data.stackLevels.length);
-        if(data.stackLevels[data.stackLevels.length-1]==="Other") colors[data.stackLevels.length-1]=css("--nan");
+        const ck2=LBL2CAT[col]||col;
+        colors=data.stackLevels.map(L=>L==="Other"?css("--nan"):catColorFor(ck2,L));
       }
       xlFromCatSpec(fixed?"Drilled vs Undrilled":"Remaining inventory",dim,meas,"barStacked",
         data.rows.map(r=>r.label),
@@ -3883,7 +4204,7 @@ function xlExport(kind){
         xlFromCatSpec(`Wells at or below each ${c2Geom.metric} tranche`,c2Geom.metric+" tranche","Wells","colStacked",
           c2Geom.rows.map(r=>r.label),
           c2Geom.stacks.map((L,si)=>({name:L,
-            color:si===c2Geom.stacks.length-1&&L.startsWith("Other")?css("--nan"):catColorAt(si),
+            color:(c2Geom.scolors&&c2Geom.scolors[si])||catColorAt(si),
             vals:c2Geom.rows.map(r=>r.segs[si])})),"tranches.xlsx");
       } else if(c2Geom.type==="tier"){
         xlFromCatSpec(`${c2Geom.metric} quartiles (Q1 best)`,"Quartile","Wells","col",
@@ -3917,13 +4238,217 @@ function xlExport(kind){
         const ym=g.start+t;
         cats.push(`${Math.floor(ym/12)}-${String(ym%12+1).padStart(2,"0")}`); idx.push(t);
       }
-      const cols=QERES?["#f79d93","#3a5088"]:g.names.map((_,i)=>catColorAt(i));
-      xlFromCatSpec("Production wedge — gas (Mcf/d)","Month","Gas (Mcf/d)","areaStacked",cats,
-        g.names.map((nm,si)=>({name:nm,color:cols[si],vals:idx.map(t=>g.sums[si][t])})),"wedge.xlsx");
+      const cols=QERES?["#f79d93","#3a5088"]:g.colors;
+      xlFromCatSpec(`Production wedge — ${g.sname} (${g.sunit})`,"Month",`${g.sname} (${g.sunit})`,"areaStacked",cats,
+        g.names.map((nm,si)=>({name:nm,color:cols[si],vals:idx.map(t=>g.sums[si][t])})),
+        `wedge_${g.sname.toLowerCase().replace(" ","_")}.xlsx`);
     }
   }catch(err){ console.error("xlsx export failed",err); alert&&console.log(err); }
 }
-/* inject an xlsx button into each chart card head */
+/* which draw call owns each chart canvas — needed to re-lay a chart out at a
+   different aspect for the widescreen export rather than letterboxing it */
+const REDRAW={inv:()=>drawInv(),dvu:()=>drawDvU(),chart1:()=>drawChart1(),
+  chart2:()=>drawChart2(),arrow:()=>drawArrow(),trend:()=>drawTrend(),wedge:()=>drawWedge()};
+/* PNG of a chart canvas: redrawn onto an opaque background with its card title
+   and the filtered well count baked in, so the image stands on its own.
+   mode "wide" re-renders the chart at 1920x1080 first (slide-ready); anything
+   else keeps the on-screen proportions. */
+function pngExport(cid,title,mode){
+  const cv=document.getElementById(cid);
+  if(!cv||!cv.width) return;
+  const d=devicePixelRatio||1, pad=10*d, head=30*d;
+  const wide=mode==="wide";
+  if(wide&&REDRAW[cid]){
+    /* 16:9 overall, so the plot area itself is 1920 x (1080 - header - padding) */
+    SIZEOVERRIDE={w:1920-Math.round(pad*2),h:1080-Math.round(head+pad)};
+    PNGWIDE=true;
+    try{ REDRAW[cid](); }catch(e){ SIZEOVERRIDE=null; PNGWIDE=false; }
+  }
+  const out=document.createElement("canvas");
+  out.width=cv.width+pad*2; out.height=cv.height+head+pad;
+  const c=out.getContext("2d");
+  c.fillStyle=css("--surface"); c.fillRect(0,0,out.width,out.height);
+  c.fillStyle=css("--ink"); c.textAlign="left";
+  c.font=`700 ${13*d}px Poppins,system-ui,sans-serif`;
+  c.fillText(title,pad,20*d);
+  c.font=`${10.5*d}px Poppins,system-ui,sans-serif`; c.fillStyle=css("--muted");
+  c.textAlign="right";
+  c.fillText(`${nSel.toLocaleString()} of ${D.n.toLocaleString()} wells`,out.width-pad,20*d);
+  c.drawImage(cv,pad,head);
+  if(SIZEOVERRIDE){ SIZEOVERRIDE=null; PNGWIDE=false; try{ REDRAW[cid](); }catch(e){} }
+  out.toBlob(b=>{
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(b);
+    a.download=title.replace(/[^A-Za-z0-9]+/g,"_").replace(/^_|_$/g,"").toLowerCase()
+      +(wide?"_16x9":"")+".png";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+  },"image/png");
+}
+
+/* ── shapefile export: filtered sticks + every layer switched on ──
+   Writes real .shp/.shx/.dbf/.prj sets (one per geometry type, as the format
+   requires) into a single zip, reusing the zip writer built for the xlsx. */
+const SHP_PRJ='GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],'
+  +'PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]';
+function dbfBytes(fields,rows){
+  /* fields: [{name,type:"C"|"N",len,dec}] — dBase III, ASCII, fixed width */
+  const recLen=1+fields.reduce((a,f)=>a+f.len,0);
+  const hLen=32+32*fields.length+1;
+  const buf=new Uint8Array(hLen+recLen*rows.length+1);
+  const dv=new DataView(buf.buffer);
+  const now=new Date();
+  buf[0]=0x03; buf[1]=now.getFullYear()-1900; buf[2]=now.getMonth()+1; buf[3]=now.getDate();
+  dv.setUint32(4,rows.length,true); dv.setUint16(8,hLen,true); dv.setUint16(10,recLen,true);
+  fields.forEach((f,i)=>{
+    const o=32+32*i;
+    for(let k=0;k<Math.min(10,f.name.length);k++) buf[o+k]=f.name.charCodeAt(k)&0x7f;
+    buf[o+11]=f.type.charCodeAt(0); buf[o+16]=f.len; buf[o+17]=f.dec||0;
+  });
+  buf[hLen-1]=0x0D;
+  let o=hLen;
+  for(const r of rows){
+    buf[o++]=0x20;
+    fields.forEach((f,i)=>{
+      let v=r[i];
+      let str;
+      if(f.type==="N"){
+        str=(v==null||!isFinite(v))?"":(+v).toFixed(f.dec||0);
+        if(str.length>f.len) str=(+v).toPrecision(Math.max(1,f.len-6));
+        str=str.padStart(f.len," ").slice(-f.len);
+      } else {
+        str=(v==null?"":String(v)).slice(0,f.len).padEnd(f.len," ");
+      }
+      for(let k=0;k<f.len;k++) buf[o+k]=str.charCodeAt(k)&0xff;
+      o+=f.len;
+    });
+  }
+  buf[o]=0x1A;
+  return buf;
+}
+/* feats: [{parts:[[ [x,y],… ],…], attrs:[…]}]  shpType 1 point / 3 line / 5 poly */
+function shpSet(feats,shpType,fields){
+  const recs=[];
+  let bb=[Infinity,Infinity,-Infinity,-Infinity];
+  for(const f of feats){
+    const pts=[].concat(...f.parts);
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    for(const q of pts){ if(q[0]<x0)x0=q[0]; if(q[0]>x1)x1=q[0];
+                         if(q[1]<y0)y0=q[1]; if(q[1]>y1)y1=q[1]; }
+    bb=[Math.min(bb[0],x0),Math.min(bb[1],y0),Math.max(bb[2],x1),Math.max(bb[3],y1)];
+    let content;
+    if(shpType===1){
+      content=new Uint8Array(20);
+      const d=new DataView(content.buffer);
+      d.setInt32(0,1,true); d.setFloat64(4,pts[0][0],true); d.setFloat64(12,pts[0][1],true);
+    } else {
+      const np=f.parts.length, n=pts.length;
+      content=new Uint8Array(44+4*np+16*n);
+      const d=new DataView(content.buffer);
+      d.setInt32(0,shpType,true);
+      d.setFloat64(4,x0,true); d.setFloat64(12,y0,true);
+      d.setFloat64(20,x1,true); d.setFloat64(28,y1,true);
+      d.setInt32(36,np,true); d.setInt32(40,n,true);
+      let acc=0;
+      f.parts.forEach((pp,i)=>{ d.setInt32(44+4*i,acc,true); acc+=pp.length; });
+      let o=44+4*np;
+      for(const q of pts){ d.setFloat64(o,q[0],true); d.setFloat64(o+8,q[1],true); o+=16; }
+    }
+    recs.push(content);
+  }
+  const hdr=(len16,type,box)=>{
+    const h=new Uint8Array(100), d=new DataView(h.buffer);
+    d.setInt32(0,9994); d.setInt32(24,len16); d.setInt32(28,1000,true); d.setInt32(32,type,true);
+    d.setFloat64(36,box[0],true); d.setFloat64(44,box[1],true);
+    d.setFloat64(52,box[2],true); d.setFloat64(60,box[3],true);
+    return h;
+  };
+  if(!isFinite(bb[0])) bb=[0,0,0,0];
+  let shpLen=50, shxLen=50;
+  for(const c of recs){ shpLen+=4+c.length/2; shxLen+=4; }
+  const shp=new Uint8Array(shpLen*2), shx=new Uint8Array(shxLen*2);
+  shp.set(hdr(shpLen,shpType,bb),0); shx.set(hdr(shxLen,shpType,bb),0);
+  const sdv=new DataView(shp.buffer), xdv=new DataView(shx.buffer);
+  let off=50, xo=100;
+  recs.forEach((c,i)=>{
+    sdv.setInt32(off*2,i+1); sdv.setInt32(off*2+4,c.length/2);
+    shp.set(c,off*2+8);
+    xdv.setInt32(xo,off); xdv.setInt32(xo+4,c.length/2); xo+=8;
+    off+=4+c.length/2;
+  });
+  return {shp,shx,dbf:dbfBytes(fields,feats.map(f=>f.attrs))};
+}
+function shpExport(){
+  const entries=[], legend=[];
+  const add=(name,set)=>{
+    entries.push([name+".shp",set.shp],[name+".shx",set.shx],
+                 [name+".dbf",set.dbf],[name+".prj",SHP_PRJ]);
+  };
+  /* 1. the filtered sticks, carrying the drawer's own metrics */
+  const catKeys=Object.keys(D.cats);
+  const numMet=sidebarNums.filter(m=>D.metrics.includes(m));
+  const numVals=numMet.map(m=>V(m));
+  const seen={}, safe=t=>{ let b=t.replace(/[^A-Za-z0-9]/g,"").slice(0,10).toUpperCase()||"F";
+    let n=b,k=1; while(seen[n]){ n=(b.slice(0,8)+(++k)).toUpperCase(); } seen[n]=1; return n; };
+  const fields=[{name:safe("NAME"),type:"C",len:60}]
+    .concat(catKeys.map(c=>({name:safe(CATLABEL[c]||c),type:"C",len:40})))
+    .concat(numMet.map(m=>({name:safe(m),type:"N",len:18,dec:4})));
+  fields.forEach((f,i)=>legend.push(`${f.name},"${i===0?"Well name":(i<=catKeys.length
+      ?(CATLABEL[catKeys[i-1]]||catKeys[i-1]):numMet[i-1-catKeys.length])}"`));
+  const wells=[];
+  for(let i=0;i<D.n;i++){
+    if(!SEL[i]) continue;
+    const g=D.geo[i];
+    wells.push({parts:[[[g[0],g[1]],[g[2],g[3]]]],
+      attrs:[D.id[i]].concat(catKeys.map(c=>D.cats[c].levels[D.cats[c].ix[i]]))
+                     .concat(numVals.map(v=>v[i]))});
+  }
+  if(wells.length) add("wells_sticks",shpSet(wells,3,fields));
+  /* 2. pads, when the map is showing them */
+  if(mapMode==="pads"&&D.pads){
+    const pf=[{name:"PADNAME",type:"C",len:60}];
+    const pads=[];
+    for(let i=0;i<D.pads.n;i++){
+      if(!SELP[i]) continue;
+      const r=D.pads.rings[i];
+      pads.push({parts:[r.map(q=>[q[0],q[1]])],attrs:[D.pads.id?D.pads.id[i]:"pad "+i]});
+    }
+    if(pads.length) add("pads",shpSet(pads,5,pf));
+  }
+  /* 3. basemap layers that are switched on */
+  const bmSets=[["counties",LAYERS.counties&&BM.counties],["states",LAYERS.states&&BM.states]];
+  for(const [nm,src] of bmSets){
+    if(!src) continue;
+    const fs=src.map(o=>({parts:o.r.map(r=>r.map(q=>[q[0],q[1]])),attrs:[o.n||nm]}));
+    if(fs.length) add(nm,shpSet(fs,5,[{name:"NAME",type:"C",len:60}]));
+  }
+  if(LAYERS.windows&&BM.windows){
+    const ap=activePlays();
+    const fs=BM.windows.filter(w=>ap.has(w.p))
+      .map(w=>({parts:w.r.map(r=>r.map(q=>[q[0],q[1]])),attrs:[w.n,w.p]}));
+    if(fs.length) add("phase_windows",shpSet(fs,5,
+      [{name:"WINDOW",type:"C",len:40},{name:"PLAY",type:"C",len:30}]));
+  }
+  /* 4. every dropped layer still switched on */
+  USERLAYERS.forEach((L,li)=>{
+    if(!L.on||!L.shapes.length) return;
+    const t=L.type==="point"?1:(L.type==="poly"?5:3);
+    const fs=L.shapes.map((sh,i)=>({parts:[sh.map(q=>[q[0],q[1]])],attrs:[L.name,i+1]}));
+    const nm=(L.name||("layer"+li)).replace(/[^A-Za-z0-9_-]+/g,"_").slice(0,40);
+    add(nm,shpSet(fs,t,[{name:"LAYER",type:"C",len:40},{name:"FID",type:"N",len:10,dec:0}]));
+  });
+  entries.push(["fields.csv","dbf_field,full_name\n"+legend.join("\n")+"\n"]);
+  const blob=xlZip(entries);
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`appalachia_map_${nSel}_wells.zip`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+document.getElementById("mapshp").addEventListener("click",()=>{
+  try{ shpExport(); }catch(e){ console.error("shapefile export failed",e); }
+});
+/* inject xlsx + png buttons into each chart card head */
 function addXlButtons(){
   const map=[["inv","inv"],["dvu","dvu"],["chart1","c1"],["chart2","c2"],
              ["arrow","arrow"],["trend","trend"],["wedge","wedge"]];
@@ -3931,10 +4456,22 @@ function addXlButtons(){
     const cv=document.getElementById(cid);
     if(!cv) continue;
     const head=cv.closest(".card").querySelector(".card-head");
+    const titleOf=()=>{ const t=head.querySelector(".t");
+      return t?t.textContent.trim():cid; };
     const b=document.createElement("button");
     b.className="xlbtn"; b.textContent="xlsx ⬇"; b.title="Download this chart + data as Excel";
     b.addEventListener("click",()=>xlExport(kind));
     head.appendChild(b);
+    const pb=document.createElement("button");
+    pb.className="xlbtn"; pb.textContent="png ⬇";
+    pb.title="Save this chart as a PNG at its on-screen proportions";
+    pb.addEventListener("click",()=>pngExport(cid,titleOf()));
+    head.appendChild(pb);
+    const wb=document.createElement("button");
+    wb.className="xlbtn"; wb.textContent="16:9 ⬇";
+    wb.title="Save this chart as a 1920x1080 widescreen PNG, sized for a slide";
+    wb.addEventListener("click",()=>pngExport(cid,titleOf(),"wide"));
+    head.appendChild(wb);
   }
 }
 
@@ -4155,7 +4692,8 @@ window.addEventListener("resize",()=>{ clearTimeout(rsz); rsz=setTimeout(redrawA
     document.querySelectorAll("[data-dvup]").forEach(x=>x.setAttribute("aria-pressed",x===b));
     drawDvU();
   }));
-  applyCfg(await loadCfg());   /* restore the user's saved filter setup */
+  await loadCfg();             /* only to detect the server; never auto-applied */
+  applyCfg(null);              /* every session starts on the full data set */
   projLoadLocal(); await projLoadServer();
   buildSidebar();
   rebuildNumBlocks();
@@ -4177,6 +4715,9 @@ window.addEventListener("resize",()=>{ clearTimeout(rsz); rsz=setTimeout(redrawA
   document.getElementById("loading").remove();
   applyFilters();
   addXlButtons();
+  try{ document.getElementById("sg-logo").src=document.querySelector(".topbar img").src; }catch(e){}
+  projBtnLabel();
+  gateOpen();                  /* pick a project, or carry on with everything */
   loadWedge(); loadTcurves();
   try{ await document.fonts.ready; redrawAll(); }catch(e){}
 })();
