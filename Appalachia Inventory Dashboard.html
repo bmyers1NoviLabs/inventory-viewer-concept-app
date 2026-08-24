@@ -2384,6 +2384,21 @@ function groupValues(metric,group){
   }
   return [...out.entries()].map(([k,vals])=>({label:cat.levels[k],vals}));
 }
+/* split a long multi-word label onto two lines instead of chopping it:
+   2+ words and over `maxc` chars → break at the space nearest the middle;
+   anything still over the cap per line gets the old ellipsis treatment */
+function wrapLabel(t,maxc){
+  const ell=s=>s.length>maxc+3?s.slice(0,maxc+2)+"…":s;
+  if(t.length<=maxc) return [t];
+  const words=t.trim().split(/\s+/);
+  if(words.length<2) return [ell(t)];
+  let best=1,bd=Infinity;
+  for(let i=1;i<words.length;i++){
+    const dlt=Math.abs(words.slice(0,i).join(" ").length-t.length/2);
+    if(dlt<bd){bd=dlt;best=i;}
+  }
+  return [ell(words.slice(0,best).join(" ")),ell(words.slice(best).join(" "))];
+}
 function drawChart2(){
   sizeCanvas(ch2);
   const d=devicePixelRatio||1,w=ch2.width,h=ch2.height;
@@ -2402,7 +2417,13 @@ function drawChart2(){
     }
     if(!rows.length){c2Geom=null;return;}
     const lo=Math.min(0,...rows.map(r=>r.mean)), hi=Math.max(0,...rows.map(r=>r.mean));
-    const ML=Math.min(150*d, 8*d+Math.max(...rows.map(r=>r.label.length))*6.4*d), MR=66*d, MT=8*d, MB=40*d;
+    /* wrap long names onto two lines when the rows are tall enough to stack;
+       the margin then only has to fit the longest line */
+    const MR=66*d, MT=8*d, MB=40*d;
+    const rlines=rows.map(r=>wrapLabel(r.label,20));
+    const stacked=rlines.some(l=>l.length>1)&&(h-MT-MB)/rows.length>=26*d;
+    const mlens=stacked?rlines.flat().map(s=>s.length):rows.map(r=>Math.min(r.label.length,20));
+    const ML=Math.min(150*d, 8*d+Math.max(...mlens)*6.4*d);
     const span=hi-lo||1, X=x=>ML+(x-lo)/span*(w-ML-MR);
     const step=(h-MT-MB)/rows.length,
           bh=Math.min(PNGWIDE?Math.min(96*d,step*0.62):26*d,step-2*d);
@@ -2426,8 +2447,16 @@ function drawChart2(){
       c2x.roundRect(x0,y,Math.max(1,x1-x0),bh, r.mean>=0?[0,rr,rr,0]:[rr,0,0,rr]);
       c2x.fill();
       c2x.fillStyle=css("--ink2"); c2x.textAlign="right"; c2x.font=`${11*d}px Poppins,system-ui,sans-serif`;
-      const lab=r.label.length>20?r.label.slice(0,19)+"…":r.label;
-      c2x.fillText(lab,ML-6*d,y+bh/2+4*d);
+      const ls=rlines[i];
+      if(stacked&&ls.length>1){
+        c2x.font=`${10.5*d}px Poppins,system-ui,sans-serif`;
+        c2x.fillText(ls[0],ML-6*d,y+bh/2-2*d);
+        c2x.fillText(ls[1],ML-6*d,y+bh/2+10*d);
+      }else{
+        /* rows too tight to stack — fit one line to the margin instead */
+        const cap=Math.max(6,Math.floor((ML-8*d)/(6.4*d)));
+        c2x.fillText(r.label.length>cap?r.label.slice(0,cap-1)+"…":r.label,ML-6*d,y+bh/2+4*d);
+      }
       c2x.textAlign="left"; c2x.fillStyle=css("--ink");
       c2x.fillText(fmt(r.mean),x1+5*d,y+bh/2+4*d);
     });
@@ -2449,7 +2478,10 @@ function drawChart2(){
     /* generous headroom below the clouds so nothing sits on the axis and the
        mean labels get clear air (ppt tool pads the bottom the same way) */
     const rng=(yhi-ylo)||1, y0=ylo-rng*.18, y1=yhi+rng*.07;
-    const ML=52*d,MR=10*d,MT=12*d,MB=78*d;
+    /* wrap long group names onto two angled lines rather than chopping them;
+       give the axis extra room whenever anything wraps */
+    const glines=gs.map(g=>wrapLabel(g.label,14));
+    const ML=52*d,MR=10*d,MT=12*d,MB=(glines.some(l=>l.length>1)?92:78)*d;
     const Y=vv=>h-MB-((vv-y0)/(y1-y0))*(h-MT-MB);
     const X=i=>ML+(i+.5)*(w-ML-MR)/gs.length;
     const slot=(w-ML-MR)/gs.length;
@@ -2509,8 +2541,8 @@ function drawChart2(){
       /* angled group name below the axis */
       c2x.fillStyle=css("--ink2"); c2x.font=`${10.5*d}px Poppins,system-ui,sans-serif`;
       c2x.save(); c2x.translate(cx,h-MB+8*d); c2x.rotate(-Math.PI/4); c2x.textAlign="right";
-      const lab=g.label.length>18?g.label.slice(0,17)+"…":g.label;
-      c2x.fillText(lab,0,9*d); c2x.restore();
+      glines[i].forEach((ln,li)=>c2x.fillText(ln,0,(9+li*12)*d));
+      c2x.restore();
     });
     c2Geom={type:"box",mode:"v",rows:gs.map(g=>({label:g.label,n:g.vals.length,mean:g.mean,
       med:g.vals[Math.floor(g.vals.length*.5)]})),X,bw:slot*.6,MT,MB,h,d,metric};
